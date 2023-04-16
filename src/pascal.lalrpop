@@ -1,0 +1,130 @@
+
+use core::str::FromStr;
+use crate::ast;
+use lalrpop_util::ParseError;
+
+grammar(state: &mut ast::State);
+
+pub Prog: ast::Prog = {
+    <p:ProgHeader> <v:VarPart> <s:StatPart> => ast::Prog::new(p, s)
+}
+
+// ----------------------------------------------------------------------------
+
+ProgHeader: String = { "program" <n:Identifier> "(" "input" "," "output" ")" ";" => n }
+
+Identifier: String = { <id:r"[a-zA-Z][a-zA-Z0-9]*"> => id.to_owned() }
+
+// ----------------------------------------------------------------------------
+
+VarPart = { "var" VarDecList }
+
+VarDecList = { VarDec, VarDecList VarDec }
+
+VarDec: () = {
+    <v:IdList> ":" <t:Type> ";" =>? {
+        for v in v {
+            state.push_variable(v, t).ok_or_else(|| ParseError::User {error: "Duplicate variable definitions"})?;
+        }
+        Ok(())
+    },
+}
+
+IdList: Vec<String> = {
+    Identifier => vec![<>],
+    <mut v:IdList> "," <id:Identifier> => {v.push(id); v},
+}
+
+Type: ast::Type = {
+    "integer" => ast::Type::Integer,
+    "real" => ast::Type::Real,
+    "boolean" => ast::Type::Boolean,
+}
+
+// ----------------------------------------------------------------------------
+
+StatPart: ast::StatList = { "begin" <s:StatList> "end" "." => s, }
+
+StatList: ast::StatList = {
+    Stat => ast::StatList(vec![<>]),
+    <mut s:StatList> ";" <st:Stat> => {s.0.push(st); s},
+}
+
+StatBlock: ast::StatList = {
+    "begin" <s:StatList> "end" => s,
+    Stat => ast::StatList(vec![<>]),
+}
+
+Stat: ast::Stat = {
+    AssignStat => <>,
+    "while" <c:Expr> "do" <s:StatBlock> => ast::Stat::While(c, s),
+    "if" <c:Expr> "then" <s:StatBlock> => ast::Stat::If(c, s),
+    "write" <e:Expr> => ast::Stat::Print(e),
+    "writeLn" <e:Expr> => ast::Stat::PrintLn(e),
+}
+
+AssignStat: ast::Stat = { <a: Assignable> ":=" <e:Expr> =>? (a.get_type(state) == e.get_type(state)).then_some(ast::Stat::Assign(a, e)).ok_or_else(|| ParseError::User {error: "Invalid assign types" }) }
+
+Assignable: ast::Assignable = {
+    <v: Variable> => ast::Assignable::Variable(v),
+    <t: Type> "[" <e: Expr> "]" => ast::Assignable::Memory(t, e),
+}
+
+Variable: ast::VariableReference = { <i:Identifier> =>? state.get_variable(&i).ok_or_else(|| {ParseError::User {error: "Undefined variable"}}) }
+
+// ----------------------------------------------------------------------------
+
+Expr: ast::Expr = {
+    <o:Operand> => ast::Expr::Operand(o),
+    "(" <e:Expr> ")" => e,
+    <a:Expr> <o:Opcode> <b:Operand> => ast::Expr::Binary(Box::new(a), o, Box::new(ast::Expr::Operand(b))),
+    <a:Expr> <o:Opcode> "(" <b:Expr> ")" => ast::Expr::Binary(Box::new(a), o, Box::new(b)),
+}
+
+Opcode: ast::Opcode = {
+    "*" => ast::Opcode::Mul, 
+    "/" => ast::Opcode::Div,
+    "%" => ast::Opcode::Mod,
+    "+" => ast::Opcode::Add, 
+    "-" => ast::Opcode::Sub,
+    "==" => ast::Opcode::Equal,
+    "!=" => ast::Opcode::NotEqual,
+    ">" => ast::Opcode::GreaterThan,
+    ">=" => ast::Opcode::GreaterEqual,
+    "<" => ast::Opcode::LessThan,
+    "<=" => ast::Opcode::LessThanEqual,
+    "&&" => ast::Opcode::And,
+    "||" => ast::Opcode::Or,
+    "^^" => ast::Opcode::Xor,
+    "&" => ast::Opcode::BitAnd,
+    "|" => ast::Opcode::BitOr,
+    "^" => ast::Opcode::BitXor,
+}
+
+
+Operand: ast::Operand = {
+    <v:Variable> => ast::Operand::Variable(v),
+    <v:Value> => ast::Operand::Value(v),
+    <t: Type> "(" <e:Expr> ")" => ast::Operand::UnaryOp(
+        match t {
+            ast::Type::Boolean => ast::UnaryOpcode::CastBool,
+            ast::Type::Integer => ast::UnaryOpcode::CastInt,            
+            ast::Type::Real => ast::UnaryOpcode::CastReal,
+        }, Box::new(e)
+    ),
+    <t: Type> "[" <e:Expr> "]" => ast::Operand::UnaryOp(
+        match t {
+            ast::Type::Boolean => ast::UnaryOpcode::MemBool,
+            ast::Type::Integer => ast::UnaryOpcode::MemInt,            
+            ast::Type::Real => ast::UnaryOpcode::MemReal,
+        }, Box::new(e)
+    ),
+}
+
+Value: ast::Value =  {
+    r"[0-9]+" =>? i32::from_str(<>).map(ast::Value::Integer).map_err(|_| ParseError::User {error: "Cannot parse int"}),
+    r"[0-9]*\.[0-9]+" =>? f64::from_str(<>).map(ast::Value::Real).map_err(|_| ParseError::User {error: "Cannot parse real"}),
+    "true" => ast::Value::Boolean(true),
+    "false" => ast::Value::Boolean(false),
+}
+
