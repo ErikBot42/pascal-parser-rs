@@ -13,15 +13,15 @@
 #![allow(clippy::cast_sign_loss)]
 #![allow(clippy::exhaustive_structs)]
 #![allow(clippy::shadow_reuse)]
+#![allow(clippy::shadow_unrelated)]
 // review later:
 #![allow(clippy::print_stdout)]
 #![allow(clippy::indexing_slicing)]
 
 use core::fmt::Write as _;
 use std::collections::HashMap;
-use std::fmt::Display;
 extern crate derive_more;
-use derive_more::{Add, Display, From, Into};
+use derive_more::{Display, From, Into};
 
 const UNCHECKED_INDEXING: bool = true;
 
@@ -205,6 +205,9 @@ impl VariableTable {
     fn get_value(&self, v: VariableReference) -> Value {
         self.variables[v.0].1
     }
+    fn get_name(&self, v: VariableReference) -> String {
+        self.variables[v.0].0.clone()
+    }
     fn set_value(&mut self, v: VariableReference, val: Value) {
         self.variables[v.0].1 = val.coerce_into(self.variables[v.0].1.get_type());
     }
@@ -241,9 +244,17 @@ pub enum BoolAssignable {
 }
 impl BoolAssignable {
     fn assign(&self, state: &mut State, val: bool) {
+        use BoolAssignable::*;
         match self {
-            BoolAssignable::Mem(e) => state.write_memory_bool(e.evaluate(state), val),
-            BoolAssignable::Variable(v) => state.set_bool_variable_value(*v, val),
+            Mem(e) => state.write_memory_bool(e.evaluate(state), val),
+            Variable(v) => state.set_bool_variable_value(*v, val),
+        }
+    }
+    fn compile(&self, state: &State) -> String {
+        use BoolAssignable::*;
+        match self {
+            Mem(e) => format!("boolean[{}]", e.compile(state)),
+            Variable(v) => state.variable_table.get_name(*v),
         }
     }
 }
@@ -254,9 +265,17 @@ pub enum IntAssignable {
 }
 impl IntAssignable {
     fn assign(&self, state: &mut State, val: i32) {
+        use IntAssignable::*;
         match self {
-            IntAssignable::Mem(e) => state.write_memory_int(e.evaluate(state), val),
-            IntAssignable::Variable(v) => state.set_int_variable_value(*v, val),
+            Mem(e) => state.write_memory_int(e.evaluate(state), val),
+            Variable(v) => state.set_int_variable_value(*v, val),
+        }
+    }
+    fn compile(&self, state: &State) -> String {
+        use IntAssignable::*;
+        match self {
+            Mem(e) => format!("integer[{}]", e.compile(state)),
+            Variable(v) => state.variable_table.get_name(*v),
         }
     }
 }
@@ -267,33 +286,26 @@ pub enum RealAssignable {
 }
 impl RealAssignable {
     fn assign(&self, state: &mut State, val: f64) {
+        use RealAssignable::*;
         match self {
-            RealAssignable::Mem(e) => state.write_memory_real(e.evaluate(state), val),
-            RealAssignable::Variable(v) => state.set_real_variable_value(*v, val),
+            Mem(e) => state.write_memory_real(e.evaluate(state), val),
+            Variable(v) => state.set_real_variable_value(*v, val),
+        }
+    }
+    fn compile(&self, state: &State) -> String {
+        use RealAssignable::*;
+        match self {
+            Mem(e) => format!("real[{}]", e.compile(state)),
+            Variable(v) => state.variable_table.get_name(*v),
         }
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, From)]
 pub enum Assignable {
     Bool(BoolAssignable),
     Int(IntAssignable),
     Real(RealAssignable),
-}
-impl From<BoolAssignable> for Assignable {
-    fn from(value: BoolAssignable) -> Self {
-        Assignable::Bool(value)
-    }
-}
-impl From<IntAssignable> for Assignable {
-    fn from(value: IntAssignable) -> Self {
-        Assignable::Int(value)
-    }
-}
-impl From<RealAssignable> for Assignable {
-    fn from(value: RealAssignable) -> Self {
-        Assignable::Real(value)
-    }
 }
 impl Assignable {
     pub fn variable(v: VariableReference, state: &State) -> Self {
@@ -310,7 +322,7 @@ impl Assignable {
             Type::Real => RealAssignable::Mem(e.cast_int()).into(),
         }
     }
-    fn get_type(&self) -> Type {
+    const fn get_type(&self) -> Type {
         match self {
             Assignable::Bool(_) => Type::Boolean,
             Assignable::Int(_) => Type::Integer,
@@ -339,26 +351,36 @@ impl Stat {
         }
     }
     fn execute(&self, state: &mut State) {
+        use Stat::*;
         match self {
-            Stat::AssignBool(a, e) => a.assign(state, e.evaluate(state)),
-            Stat::AssignReal(a, e) => a.assign(state, e.evaluate(state)),
-            Stat::AssignInt(a, e) => a.assign(state, e.evaluate(state)),
-            Stat::If(e, s) => {
+            AssignBool(a, e) => a.assign(state, e.evaluate(state)),
+            AssignReal(a, e) => a.assign(state, e.evaluate(state)),
+            AssignInt(a, e) => a.assign(state, e.evaluate(state)),
+            If(e, s) => {
                 if e.evaluate(state) {
                     s.execute(state);
                 }
             }
-            Stat::While(e, s) => {
+            While(e, s) => {
                 while e.evaluate(state) {
                     s.execute(state);
                 }
             }
-            Stat::Print(e) => print!("{}", e.evaluate(state)),
-            Stat::PrintLn(e) => println!("{}", e.evaluate(state)),
+            Print(e) => print!("{}", e.evaluate(state)),
+            PrintLn(e) => println!("{}", e.evaluate(state)),
         }
     }
     fn compile(&self, state: &State) -> String {
-        todo!()
+        use Stat::*;
+        match self {
+            AssignBool(a, e) => format!("{} = {};\n", a.compile(state), e.compile(state)),
+            AssignReal(a, e) => format!("{} = {};\n", a.compile(state), e.compile(state)),
+            AssignInt(a, e) => format!("{} = {};\n", a.compile(state), e.compile(state)),
+            If(e, s) => format!("if {} {{\n {} }}\n", e.compile(state), s.compile(state)),
+            While(e, s) => format!("while {} {{\n {} }}\n", e.compile(state), s.compile(state)),
+            Print(e) => format!("print!(\"{{:?}}\"{});\n", e.compile(state)),
+            PrintLn(e) => format!("println!(\"{{:?}}\"{});\n", e.compile(state)),
+        }
     }
 }
 
@@ -417,23 +439,12 @@ pub enum ValuePair {
     Real(f64, f64),
     Boolean(bool, bool),
 }
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, From, Display)]
 pub enum Value {
     Integer(i32),
     Real(f64),
     Boolean(bool),
 }
-impl Display for Value {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Value::Integer(v) => write!(f, "{v:?}"),
-            Value::Real(v) => write!(f, "{v:?}"),
-            Value::Boolean(v) => write!(f, "{v:?}"),
-        }
-    }
-}
-
-
 #[rustfmt::skip]
 impl From<Value> for usize { fn from(val: Value) -> Self { val.coerce_integer() as usize } }
 #[rustfmt::skip]
@@ -442,12 +453,6 @@ impl From<Value> for i32 { fn from(val: Value) -> Self { val.coerce_integer() } 
 impl From<Value> for f64 { fn from(val: Value) -> Self { val.coerce_real() } }
 #[rustfmt::skip]
 impl From<Value> for bool { fn from(val: Value) -> Self { val.coerce_bool() } }
-#[rustfmt::skip]
-impl From<i32> for Value { fn from(value: i32) -> Self { Self::Integer(value) } }
-#[rustfmt::skip]
-impl From<f64> for Value { fn from(value: f64) -> Self { Self::Real(value) } }
-#[rustfmt::skip]
-impl From<bool> for Value { fn from(value: bool) -> Self { Self::Boolean(value) } }
 impl Value {
     const fn default_from_type(t: Type) -> Value {
         use Type::*;
@@ -463,15 +468,6 @@ impl Value {
             Boolean => Value::Boolean(self.coerce_bool()),
             Integer => Value::Integer(self.coerce_integer()),
             Real => Value::Real(self.coerce_real()),
-        }
-    }
-    fn coerce_equal(self, other: Value) -> ValuePair {
-        use Type::*;
-        let typ = self.get_type().max(other.get_type());
-        match typ {
-            Boolean => ValuePair::Boolean(self.coerce_bool(), other.coerce_bool()),
-            Integer => ValuePair::Integer(self.coerce_integer(), other.coerce_integer()),
-            Real => ValuePair::Real(self.coerce_real(), other.coerce_real()),
         }
     }
     const fn coerce_real(self) -> f64 {
@@ -539,26 +535,11 @@ pub enum BinaryOpcode {
     BitShiftLeft,
 }
 
-#[derive(Debug)]
+#[derive(Debug, From)]
 pub enum Expr {
     Bool(BoolExpr),
     Int(IntExpr),
     Real(RealExpr),
-}
-impl From<BoolExpr> for Expr {
-    fn from(value: BoolExpr) -> Self {
-        Self::Bool(value)
-    }
-}
-impl From<IntExpr> for Expr {
-    fn from(value: IntExpr) -> Self {
-        Self::Int(value)
-    }
-}
-impl From<RealExpr> for Expr {
-    fn from(value: RealExpr) -> Self {
-        Self::Real(value)
-    }
 }
 #[derive(Debug)]
 enum ExprPair {
@@ -572,6 +553,13 @@ impl Expr {
             Expr::Bool(e) => e.evaluate(state).into(),
             Expr::Int(e) => e.evaluate(state).into(),
             Expr::Real(e) => e.evaluate(state).into(),
+        }
+    }
+    fn compile(&self, state: &State) -> String {
+        match self {
+            Expr::Bool(e) => e.compile(state),
+            Expr::Int(e) => e.compile(state),
+            Expr::Real(e) => e.compile(state),
         }
     }
     pub fn variable(v: VariableReference, state: &State) -> Expr {
@@ -648,6 +636,7 @@ impl Expr {
             Expr::Real(e) => e,
         }
     }
+    #[must_use]
     pub fn cast_type(self, new_type: Type) -> Self {
         match new_type {
             Type::Boolean => self.cast_bool().into(),
@@ -655,7 +644,7 @@ impl Expr {
             Type::Real => self.cast_real().into(),
         }
     }
-    pub fn get_type(&self) -> Type {
+    pub const fn get_type(&self) -> Type {
         match self {
             Expr::Bool(_) => Type::Boolean,
             Expr::Int(_) => Type::Integer,
@@ -671,6 +660,19 @@ pub enum CmpOpcode {
     GreaterEqual,
     LessThan,
     LessThanEqual,
+}
+impl CmpOpcode {
+    fn as_str(&self) -> &'static str {
+        use CmpOpcode::*;
+        match self {
+            Equal => "==",
+            NotEqual => "!=",
+            GreaterThan => ">",
+            GreaterEqual => ">=",
+            LessThan => "<",
+            LessThanEqual => "<=",
+        }
+    }
 }
 impl TryFrom<BinaryOpcode> for CmpOpcode {
     type Error = String;
@@ -760,6 +762,38 @@ impl BoolExpr {
             BoolExpr::Value(b) => *b,
         }
     }
+    fn compile(&self, state: &State) -> String {
+        use BoolExpr::*;
+        use BoolOpcode::*;
+        match self {
+            CompareInt(a, op, b) => format!(
+                "({}) {} ({})",
+                a.compile(state),
+                op.as_str(),
+                b.compile(state)
+            ),
+            CompareReal(a, op, b) => format!(
+                "({}) {} ({})",
+                a.compile(state),
+                op.as_str(),
+                b.compile(state)
+            ),
+            Binary(a, op, b) => format!(
+                "({}) {} ({})",
+                a.compile(state),
+                match op {
+                    And => "&&",
+                    Or => "||",
+                    Xor => "!=",
+                },
+                b.compile(state),
+            ),
+            Mem(e) => todo!(),
+            FromInt(_) => todo!(),
+            Variable(_) => todo!(),
+            Value(_) => todo!(),
+        }
+    }
 }
 #[derive(Debug)]
 pub enum IntOpcode {
@@ -804,8 +838,9 @@ pub enum IntExpr {
 }
 impl IntExpr {
     fn evaluate(&self, state: &State) -> i32 {
+        use IntExpr::*;
         match self {
-            IntExpr::Binary(a, op, b) => {
+            Binary(a, op, b) => {
                 let a = a.evaluate(state);
                 let b = b.evaluate(state);
                 use IntOpcode::*;
@@ -822,11 +857,22 @@ impl IntExpr {
                     BitShiftLeft => a << b,
                 }
             }
-            IntExpr::Mem(e) => state.read_memory_int(e.evaluate(state)),
-            IntExpr::FromBool(b) => b.evaluate(state) as i32,
-            IntExpr::FromReal(r) => r.evaluate(state) as i32,
-            IntExpr::Variable(v) => state.get_int_variable_value(*v),
-            IntExpr::Value(i) => *i,
+            Mem(e) => state.read_memory_int(e.evaluate(state)),
+            FromBool(b) => b.evaluate(state) as i32,
+            FromReal(r) => r.evaluate(state) as i32,
+            Variable(v) => state.get_int_variable_value(*v),
+            Value(i) => *i,
+        }
+    }
+    fn compile(&self, state: &State) -> String {
+        use IntExpr::*;
+        match self {
+            Binary(a, op, b) => todo!(),
+            Mem(e) => todo!(),
+            FromBool(e) => todo!(),
+            FromReal(e) => todo!(),
+            Variable(v) => todo!(),
+            Value(v) => todo!(),
         }
     }
 }
@@ -880,6 +926,15 @@ impl RealExpr {
             RealExpr::FromInt(i) => i.evaluate(state) as f64,
             RealExpr::Variable(v) => state.get_real_variable_value(*v),
             RealExpr::Value(r) => *r,
+        }
+    }
+    fn compile(&self, state: &State) -> String {
+        match self {
+            RealExpr::Binary(_, _, _) => todo!(),
+            RealExpr::Mem(_) => todo!(),
+            RealExpr::FromInt(_) => todo!(),
+            RealExpr::Variable(_) => todo!(),
+            RealExpr::Value(_) => todo!(),
         }
     }
 }
