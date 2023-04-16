@@ -19,6 +19,9 @@
 
 use core::fmt::Write as _;
 use std::collections::HashMap;
+use std::fmt::Display;
+extern crate derive_more;
+use derive_more::{Add, Display, From, Into};
 
 const UNCHECKED_INDEXING: bool = true;
 
@@ -119,6 +122,15 @@ impl State {
             Integer => self.mem_int[addr] = val.into(),
             Real => self.mem_real[addr] = val.into(),
         }
+    }
+    pub fn set_bool_variable_value(&mut self, v: VariableReference, val: bool) {
+        self.set_variable_value(v, Value::Boolean(val));
+    }
+    pub fn set_int_variable_value(&mut self, v: VariableReference, val: i32) {
+        self.set_variable_value(v, Value::Integer(val));
+    }
+    pub fn set_real_variable_value(&mut self, v: VariableReference, val: f64) {
+        self.set_variable_value(v, Value::Real(val));
     }
     pub fn get_int_variable_value(&self, v: VariableReference) -> i32 {
         if let Value::Integer(i) = self.get_variable_value(v) {
@@ -223,131 +235,130 @@ impl VariableReference {
 }
 
 #[derive(Debug)]
-pub enum Operand {
-    Value(Value),
+pub enum BoolAssignable {
+    Mem(IntExpr),
     Variable(VariableReference),
-    UnaryOp(UnaryOpcode, Box<Expr>),
 }
-impl Operand {
-    pub fn get_type(&self, state: &State) -> Type {
-        use Operand::*;
+impl BoolAssignable {
+    fn assign(&self, state: &mut State, val: bool) {
         match self {
-            Value(v) => v.get_type(),
-            Variable(v) => v.get_type(state),
-            UnaryOp(opcode, _) => opcode.get_type(),
+            BoolAssignable::Mem(e) => state.write_memory_bool(e.evaluate(state), val),
+            BoolAssignable::Variable(v) => state.set_bool_variable_value(*v, val),
         }
     }
-    fn evaluate(&self, state: &State) -> Value {
-        use Operand::*;
+}
+#[derive(Debug)]
+pub enum IntAssignable {
+    Mem(IntExpr),
+    Variable(VariableReference),
+}
+impl IntAssignable {
+    fn assign(&self, state: &mut State, val: i32) {
         match self {
-            Value(v) => *v,
-            Variable(v) => state.get_variable_value(*v),
-            UnaryOp(opcode, e) => opcode.evaluate(e.evaluate(state), state),
+            IntAssignable::Mem(e) => state.write_memory_int(e.evaluate(state), val),
+            IntAssignable::Variable(v) => state.set_int_variable_value(*v, val),
         }
     }
-    fn compile(&self, state: &State) -> String {
-        use Operand::*;
+}
+#[derive(Debug)]
+pub enum RealAssignable {
+    Mem(IntExpr),
+    Variable(VariableReference),
+}
+impl RealAssignable {
+    fn assign(&self, state: &mut State, val: f64) {
         match self {
-            Value(v) => v.compile(),
-            Variable(v) => v.compile(state),
-            UnaryOp(op, e) => op.compile(e, state),
+            RealAssignable::Mem(e) => state.write_memory_real(e.evaluate(state), val),
+            RealAssignable::Variable(v) => state.set_real_variable_value(*v, val),
         }
     }
 }
 
 #[derive(Debug)]
 pub enum Assignable {
-    Variable(VariableReference),
-    Memory(Type, Expr),
+    Bool(BoolAssignable),
+    Int(IntAssignable),
+    Real(RealAssignable),
+}
+impl From<BoolAssignable> for Assignable {
+    fn from(value: BoolAssignable) -> Self {
+        Assignable::Bool(value)
+    }
+}
+impl From<IntAssignable> for Assignable {
+    fn from(value: IntAssignable) -> Self {
+        Assignable::Int(value)
+    }
+}
+impl From<RealAssignable> for Assignable {
+    fn from(value: RealAssignable) -> Self {
+        Assignable::Real(value)
+    }
 }
 impl Assignable {
-    pub fn get_type(&self, state: &State) -> Type {
-        use Assignable::*;
-        match self {
-            Variable(v) => v.get_type(state),
-            Memory(t, _) => *t,
+    pub fn variable(v: VariableReference, state: &State) -> Self {
+        match state.get_variable_type(v) {
+            Type::Boolean => BoolAssignable::Variable(v).into(),
+            Type::Integer => IntAssignable::Variable(v).into(),
+            Type::Real => RealAssignable::Variable(v).into(),
         }
     }
-    fn assign(&self, val: Value, state: &mut State) {
-        use Assignable::*;
-        match self {
-            Variable(v) => state.set_variable_value(*v, val),
-            Memory(t, e) => state.write_memory(*t, e.evaluate(state), val),
+    pub fn memory(t: Type, e: Expr, state: &State) -> Self {
+        match t {
+            Type::Boolean => BoolAssignable::Mem(e.cast_int()).into(),
+            Type::Integer => IntAssignable::Mem(e.cast_int()).into(),
+            Type::Real => RealAssignable::Mem(e.cast_int()).into(),
         }
     }
-    fn compile(&self, state: &State) -> String {
-        use Assignable::*;
+    fn get_type(&self) -> Type {
         match self {
-            Variable(v) => v.compile(state),
-            Memory(t, e) => {
-                if UNCHECKED_INDEXING {
-                    format!(
-                        "*unsafe {{ {}.get_unchecked(({}) as usize) }}",
-                        t.as_pascal_string(),
-                        e.compile(state)
-                    )
-                } else {
-                    format!("{}[({}) as usize]", t.as_pascal_string(), e.compile(state))
-                }
-            }
+            Assignable::Bool(_) => Type::Boolean,
+            Assignable::Int(_) => Type::Integer,
+            Assignable::Real(_) => Type::Real,
         }
     }
 }
 
 #[derive(Debug)]
 pub enum Stat {
-    Assign(Assignable, Expr),
-    If(Expr, StatList),
-    While(Expr, StatList),
+    AssignBool(BoolAssignable, BoolExpr),
+    AssignReal(RealAssignable, RealExpr),
+    AssignInt(IntAssignable, IntExpr),
+    If(BoolExpr, StatList),
+    While(BoolExpr, StatList),
     Print(Expr),
     PrintLn(Expr),
 }
 impl Stat {
+    pub fn assign(a: Assignable, e: Expr) -> Result<Self, String> {
+        match (a, e) {
+            (Assignable::Bool(a), Expr::Bool(e)) => Ok(Stat::AssignBool(a, e)),
+            (Assignable::Int(a), Expr::Int(e)) => Ok(Stat::AssignInt(a, e)),
+            (Assignable::Real(a), Expr::Real(e)) => Ok(Stat::AssignReal(a, e)),
+            (a, e) => Err(format!("Invalid assign {a:?} with {e:?}")),
+        }
+    }
     fn execute(&self, state: &mut State) {
-        use Stat::*;
-        use Value::*;
-        state.executed_statements += 1;
         match self {
-            Assign(a, e) => a.assign(e.evaluate(state), state),
-            If(e, s) => {
-                if e.evaluate(state).coerce_bool() {
+            Stat::AssignBool(a, e) => a.assign(state, e.evaluate(state)),
+            Stat::AssignReal(a, e) => a.assign(state, e.evaluate(state)),
+            Stat::AssignInt(a, e) => a.assign(state, e.evaluate(state)),
+            Stat::If(e, s) => {
+                if e.evaluate(state) {
                     s.execute(state);
                 }
             }
-            While(e, s) => {
-                while e.evaluate(state).coerce_bool() {
+            Stat::While(e, s) => {
+                while e.evaluate(state) {
                     s.execute(state);
                 }
             }
-            Print(e) => match e.evaluate(state) {
-                Integer(v) => print!("{v}"),
-                Real(v) => print!("{v}"),
-                Boolean(v) => print!("{v}"),
-            },
-            PrintLn(e) => match e.evaluate(state) {
-                Integer(v) => println!("{v}"),
-                Real(v) => println!("{v}"),
-                Boolean(v) => println!("{v}"),
-            },
+            Stat::Print(e) => print!("{}", e.evaluate(state)),
+            Stat::PrintLn(e) => println!("{}", e.evaluate(state)),
         }
     }
     fn compile(&self, state: &State) -> String {
-        use Stat::*;
-        match self {
-            Assign(a, e) => format!("{} = {};\n", a.compile(state), e.compile(state)),
-            If(e, s) => format!("if {} {}", e.compile(state), s.compile(state)),
-            While(e, s) => {
-                format!("while {} {}", e.compile(state), s.compile(state))
-            }
-            Print(e) => format!(
-                "write!(__internal_stdout_print_lock,\"{{}}\", {});\n",
-                e.compile(state)
-            ),
-            PrintLn(e) => format!(
-                "writeln!(__internal_stdout_print_lock,\"{{}}\", {});\n",
-                e.compile(state)
-            ),
-        }
+        todo!()
     }
 }
 
@@ -412,6 +423,17 @@ pub enum Value {
     Real(f64),
     Boolean(bool),
 }
+impl Display for Value {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Value::Integer(v) => write!(f, "{v:?}"),
+            Value::Real(v) => write!(f, "{v:?}"),
+            Value::Boolean(v) => write!(f, "{v:?}"),
+        }
+    }
+}
+
+
 #[rustfmt::skip]
 impl From<Value> for usize { fn from(val: Value) -> Self { val.coerce_integer() as usize } }
 #[rustfmt::skip]
@@ -493,47 +515,8 @@ impl Value {
         }
     }
 }
-
 #[derive(Debug, Copy, Clone)]
-pub enum UnaryOpcode {
-    CastBool,
-    CastReal,
-    CastInt,
-    MemBool,
-    MemReal,
-    MemInt,
-}
-impl UnaryOpcode {
-    const fn get_type(self) -> Type {
-        use Type::*;
-        use UnaryOpcode::*;
-        match self {
-            CastBool | MemBool => Boolean,
-            CastReal | MemReal => Real,
-            CastInt | MemInt => Integer,
-        }
-    }
-    fn evaluate(self, a: Value, state: &State) -> Value {
-        use UnaryOpcode::*;
-        match self {
-            CastBool | CastReal | CastInt => a.coerce_into(self.get_type()),
-            MemInt | MemReal | MemBool => state.read_memory(self.get_type(), a),
-        }
-    }
-    fn compile(self, a: &Expr, state: &State) -> String {
-        use UnaryOpcode::*;
-        match self {
-            CastBool | CastReal | CastInt => a.compile_cast_type(self.get_type(), state),
-            MemBool | MemReal | MemInt => format!(
-                "{}[({}) as usize]",
-                self.get_type().as_pascal_string(),
-                a.compile_cast_integer(state)
-            ),
-        }
-    }
-}
-#[derive(Debug, Copy, Clone)]
-pub enum Opcode {
+pub enum BinaryOpcode {
     Mul,
     Div,
     Mod,
@@ -548,554 +531,355 @@ pub enum Opcode {
     And,
     Or,
     Xor,
+
     BitAnd,
     BitOr,
     BitXor,
     BitShiftRight,
     BitShiftLeft,
 }
-impl Opcode {
-    fn evaluate(self, a: Value, b: Value) -> Value {
-        macro_rules! op_equal_type {( $p:tt ) => {
-            match a.coerce_equal(b) {
-                ValuePair::Integer(a, b) => Integer(a $p b),
-                ValuePair::Real(a, b) => Real(a $p b),
-                ValuePair::Boolean(a, b) => Boolean(((a as u8) $p (b as u8)) != 0),
-            }};
-        }
-        macro_rules! op_cmp {( $p:tt ) => {
-            match a.coerce_equal(b) {
-                ValuePair::Integer(a, b) => Boolean(a $p b),
-                ValuePair::Real(a, b) => Boolean(a $p b),
-                ValuePair::Boolean(a, b) => Boolean(a $p b),
-            }};
-        }
-        use Opcode::*;
-        use Value::*;
-        match self {
-            Mul => op_equal_type!(*),
-            Div => op_equal_type!(/),
-            Mod => op_equal_type!(%),
-            Add => op_equal_type!(+),
-            Sub => op_equal_type!(-),
-            Equal => op_cmp!(==),
-            NotEqual => op_cmp!(!=),
-            GreaterThan => op_cmp!(>),
-            GreaterEqual => op_cmp!(>=),
-            LessThan => op_cmp!(<),
-            LessThanEqual => op_cmp!(<=),
-            BitAnd => Integer(a.coerce_integer() & b.coerce_integer()),
-            BitOr => Integer(a.coerce_integer() | b.coerce_integer()),
-            BitXor => Integer(a.coerce_integer() ^ b.coerce_integer()),
-            BitShiftRight => Integer(a.coerce_integer() >> b.coerce_integer()),
-            BitShiftLeft => Integer(a.coerce_integer() << b.coerce_integer()),
-            And => Boolean(a.coerce_bool() && b.coerce_bool()),
-            Or => Boolean(a.coerce_bool() || b.coerce_bool()),
-            Xor => Boolean(a.coerce_bool() != b.coerce_bool()),
-        }
-    }
-    fn get_type(self, a: Type, b: Type) -> Type {
-        use Opcode::*;
-        use Type::*;
-        match self {
-            Mul | Div | Mod | Add | Sub => a.max(b),
-            Equal | NotEqual | GreaterThan | GreaterEqual | LessThan | LessThanEqual | And | Or
-            | Xor => Boolean,
-            BitAnd | BitOr | BitXor | BitShiftRight | BitShiftLeft => Integer,
-        }
-    }
-    fn compile(self, state: &State, a: &Expr, b: &Expr) -> String {
-        macro_rules! op_equal_type {
-            ( $p:tt ) => {{
-                let (typ, (ca, cb)) = a.compile_coerce_equal(b, state);
-                match typ {
-                    Boolean => format!("({}) as u8 {} ({}) as u8", ca, $p, cb),
-                    Integer => format!("({}) {} ({})", ca, $p, cb),
-                    Real => format!("({}) {} ({})", ca, $p, cb),
-                }
-            }};
-        }
-        macro_rules! op_cmp {
-            ( $p:tt ) => {{
-                let (typ, (ca, cb)) = a.compile_coerce_equal(b, state);
-                match typ {
-                    Boolean => format!("({}) {} ({})", ca, $p, cb),
-                    Integer => format!("({}) {} ({})", ca, $p, cb),
-                    Real => format!("({}) {} ({})", ca, $p, cb),
-                }
-            }};
-        }
-        use Opcode::*;
-        use Type::*;
-        match self {
-            Mul => op_equal_type!("*"),
-            Div => op_equal_type!("/"),
-            Mod => op_equal_type!("%"),
-            Add => op_equal_type!("+"),
-            Sub => op_equal_type!("-"),
-            Equal => op_cmp!("=="),
-            NotEqual => op_cmp!("!="),
-            GreaterThan => op_cmp!(">"),
-            GreaterEqual => op_cmp!(">="),
-            LessThan => op_cmp!("<"),
-            LessThanEqual => op_cmp!("<="),
-            BitAnd => format!(
-                "({}) & ({})",
-                a.compile_cast_integer(state),
-                b.compile_cast_integer(state)
-            ),
-            BitOr => format!(
-                "({}) | ({})",
-                a.compile_cast_integer(state),
-                b.compile_cast_integer(state)
-            ),
-            BitXor => format!(
-                "({}) ^ ({})",
-                a.compile_cast_integer(state),
-                b.compile_cast_integer(state)
-            ),
-            BitShiftRight => format!(
-                "({}) >> ({})",
-                a.compile_cast_integer(state),
-                b.compile_cast_integer(state)
-            ),
-            BitShiftLeft => format!(
-                "({}) << ({})",
-                a.compile_cast_integer(state),
-                b.compile_cast_integer(state)
-            ),
-            And => format!(
-                "({}) && ({})",
-                a.compile_cast_bool(state),
-                b.compile_cast_bool(state)
-            ),
-            Or => format!(
-                "({}) || ({})",
-                a.compile_cast_bool(state),
-                b.compile_cast_bool(state)
-            ),
-            Xor => format!(
-                "({}) != ({})",
-                a.compile_cast_bool(state),
-                b.compile_cast_bool(state)
-            ),
-        }
-    }
-}
-
-mod prototype {
-    use super::State;
-    use super::Type;
-    use super::Value;
-    use super::VariableReference;
-    #[derive(Debug, Copy, Clone)]
-    pub enum BinaryOpcode {
-        Mul,
-        Div,
-        Mod,
-        Add,
-        Sub,
-        Equal,
-        NotEqual,
-        GreaterThan,
-        GreaterEqual,
-        LessThan,
-        LessThanEqual,
-        And,
-        Or,
-        Xor,
-
-        BitAnd,
-        BitOr,
-        BitXor,
-        BitShiftRight,
-        BitShiftLeft,
-    }
-
-    pub enum Expr {
-        Bool(BoolExpr),
-        Int(IntExpr),
-        Real(RealExpr),
-    }
-    impl From<BoolExpr> for Expr {
-        fn from(value: BoolExpr) -> Self {
-            Self::Bool(value)
-        }
-    }
-    impl From<IntExpr> for Expr {
-        fn from(value: IntExpr) -> Self {
-            Self::Int(value)
-        }
-    }
-    impl From<RealExpr> for Expr {
-        fn from(value: RealExpr) -> Self {
-            Self::Real(value)
-        }
-    }
-    enum ExprPair {
-        Bool(BoolExpr, BoolExpr),
-        Int(IntExpr, IntExpr),
-        Real(RealExpr, RealExpr),
-    }
-    impl Expr {
-        pub fn from_variable(v: VariableReference, state: &State) -> Expr {
-            match state.get_variable_type(v) {
-                Type::Boolean => BoolExpr::Variable(v).into(),
-                Type::Integer => IntExpr::Variable(v).into(),
-                Type::Real => RealExpr::Variable(v).into(),
-            }
-        }
-        pub fn from_value(v: Value) -> Expr {
-            match v {
-                Value::Integer(i) => IntExpr::Value(i).into(),
-                Value::Real(r) => RealExpr::Value(r).into(),
-                Value::Boolean(b) => BoolExpr::Value(b).into(),
-            }
-        }
-        pub fn binary(a: Expr, b: Expr, op: BinaryOpcode) -> Result<Expr, String> {
-            match a.coerce_equal(b) {
-                ExprPair::Bool(a, b) => op
-                    .try_into()
-                    .map(|op| BoolExpr::Binary(Box::new(a), op, Box::new(b)).into()),
-                ExprPair::Int(a, b) => {
-                    let a = Box::new(a);
-                    let b = Box::new(b);
-                    match (op.try_into(), op.try_into()) {
-                        (Ok(op), _) => Ok(BoolExpr::CompareInt(a, op, b).into()),
-                        (_, Ok(op)) => Ok(IntExpr::Binary(a, op, b).into()),
-                        (Err(e1), Err(e2)) => Err(format!("{e1}, {e2}")),
-                    }
-                }
-                ExprPair::Real(a, b) => {
-                    let a = Box::new(a);
-                    let b = Box::new(b);
-                    match (op.try_into(), op.try_into()) {
-                        (Ok(op), _) => Ok(BoolExpr::CompareReal(a, op, b).into()),
-                        (_, Ok(op)) => Ok(RealExpr::Binary(a, op, b).into()),
-                        (Err(e1), Err(e2)) => Err(format!("{e1}, {e2}")),
-                    }
-                }
-            }
-        }
-        fn coerce_equal(self: Expr, b: Expr) -> ExprPair {
-            match self.get_type().max(b.get_type()) {
-                Type::Boolean => ExprPair::Bool(self.cast_bool(), b.cast_bool()),
-                Type::Integer => ExprPair::Int(self.cast_int(), b.cast_int()),
-                Type::Real => ExprPair::Real(self.cast_real(), b.cast_real()),
-            }
-        }
-        fn cast_bool(self) -> BoolExpr {
-            match self {
-                Expr::Bool(e) => e,
-                Expr::Int(e) => BoolExpr::FromInt(Box::new(e)),
-                Expr::Real(e) => BoolExpr::FromInt(Box::new(IntExpr::FromReal(Box::new(e)))),
-            }
-        }
-        fn cast_int(self) -> IntExpr {
-            match self {
-                Expr::Bool(e) => IntExpr::FromBool(Box::new(e)),
-                Expr::Int(e) => e,
-                Expr::Real(e) => IntExpr::FromReal(Box::new(e)),
-            }
-        }
-        fn cast_real(self) -> RealExpr {
-            match self {
-                Expr::Bool(e) => RealExpr::FromInt(Box::new(IntExpr::FromBool(Box::new(e)))),
-                Expr::Int(e) => RealExpr::FromInt(Box::new(e)),
-                Expr::Real(e) => e,
-            }
-        }
-        fn get_type(&self) -> Type {
-            match self {
-                Expr::Bool(_) => Type::Boolean,
-                Expr::Int(_) => Type::Integer,
-                Expr::Real(_) => Type::Real,
-            }
-        }
-    }
-    pub enum CmpOpcode {
-        Equal,
-        NotEqual,
-        GreaterThan,
-        GreaterEqual,
-        LessThan,
-        LessThanEqual,
-    }
-    impl TryFrom<BinaryOpcode> for CmpOpcode {
-        type Error = String;
-        fn try_from(value: BinaryOpcode) -> Result<Self, Self::Error> {
-            use CmpOpcode::*;
-            match value {
-                BinaryOpcode::Equal => Ok(Equal),
-                BinaryOpcode::NotEqual => Ok(NotEqual),
-                BinaryOpcode::GreaterThan => Ok(GreaterThan),
-                BinaryOpcode::GreaterEqual => Ok(GreaterEqual),
-                BinaryOpcode::LessThan => Ok(LessThan),
-                BinaryOpcode::LessThanEqual => Ok(LessThanEqual),
-                _ => Err(format!("{value:?} is not a comparasion operation")),
-            }
-        }
-    }
-    pub enum BoolOpcode {
-        And,
-        Or,
-        Xor,
-    }
-    impl TryFrom<BinaryOpcode> for BoolOpcode {
-        type Error = String;
-        fn try_from(value: BinaryOpcode) -> Result<Self, Self::Error> {
-            use BoolOpcode::*;
-            match value {
-                BinaryOpcode::And => Ok(And),
-                BinaryOpcode::Or => Ok(Or),
-                BinaryOpcode::Xor => Ok(Xor),
-                _ => Err(format!("{value:?} is not a binary operation")),
-            }
-        }
-    }
-    pub enum BoolExpr {
-        CompareInt(Box<IntExpr>, CmpOpcode, Box<IntExpr>),
-        CompareReal(Box<RealExpr>, CmpOpcode, Box<RealExpr>),
-        Binary(Box<BoolExpr>, BoolOpcode, Box<BoolExpr>),
-        Mem(Box<IntExpr>),
-        FromInt(Box<IntExpr>),
-        Variable(VariableReference),
-        Value(bool),
-    }
-    impl BoolExpr {
-        fn evaluate(&self, state: &State) -> bool {
-            match self {
-                BoolExpr::CompareInt(a, op, b) => {
-                    let a = a.evaluate(state);
-                    let b = b.evaluate(state);
-                    use CmpOpcode::*;
-                    match op {
-                        Equal => a == b,
-                        NotEqual => a != b,
-                        GreaterThan => a > b,
-                        GreaterEqual => a >= b,
-                        LessThan => a < b,
-                        LessThanEqual => a <= b,
-                    }
-                }
-                BoolExpr::CompareReal(a, op, b) => {
-                    let a = a.evaluate(state);
-                    let b = b.evaluate(state);
-                    use CmpOpcode::*;
-                    match op {
-                        Equal => a == b,
-                        NotEqual => a != b,
-                        GreaterThan => a > b,
-                        GreaterEqual => a >= b,
-                        LessThan => a < b,
-                        LessThanEqual => a <= b,
-                    }
-                }
-                BoolExpr::Binary(a, op, b) => {
-                    let a = a.evaluate(state);
-                    let b = b.evaluate(state);
-                    use BoolOpcode::*;
-                    match op {
-                        And => a && b,
-                        Or => a || b,
-                        Xor => a != b,
-                    }
-                }
-                BoolExpr::Mem(e) => state.read_memory_bool(e.evaluate(state)),
-                BoolExpr::FromInt(i) => i.evaluate(state) != 0,
-                BoolExpr::Variable(v) => state.get_bool_variable_value(*v),
-                BoolExpr::Value(b) => *b,
-            }
-        }
-    }
-    pub enum IntOpcode {
-        Mul,
-        Div,
-        Mod,
-        Add,
-        Sub,
-        BitAnd,
-        BitOr,
-        BitXor,
-        BitShiftRight,
-        BitShiftLeft,
-    }
-    impl TryFrom<BinaryOpcode> for IntOpcode {
-        type Error = String;
-        fn try_from(value: BinaryOpcode) -> Result<Self, Self::Error> {
-            use IntOpcode::*;
-            match value {
-                BinaryOpcode::Mul => Ok(Mul),
-                BinaryOpcode::Div => Ok(Div),
-                BinaryOpcode::Mod => Ok(Mod),
-                BinaryOpcode::Add => Ok(Add),
-                BinaryOpcode::Sub => Ok(Sub),
-                BinaryOpcode::BitAnd => Ok(BitAnd),
-                BinaryOpcode::BitOr => Ok(BitOr),
-                BinaryOpcode::BitXor => Ok(BitXor),
-                BinaryOpcode::BitShiftRight => Ok(BitShiftRight),
-                BinaryOpcode::BitShiftLeft => Ok(BitShiftLeft),
-                _ => Err(format!("{value:?} is not an integer operation")),
-            }
-        }
-    }
-    pub enum IntExpr {
-        Binary(Box<IntExpr>, IntOpcode, Box<IntExpr>),
-        Mem(Box<IntExpr>),
-        FromBool(Box<BoolExpr>),
-        FromReal(Box<RealExpr>),
-        Variable(VariableReference),
-        Value(i32),
-    }
-    impl IntExpr {
-        fn evaluate(&self, state: &State) -> i32 {
-            match self {
-                IntExpr::Binary(a, op, b) => {
-                    let a = a.evaluate(state);
-                    let b = b.evaluate(state);
-                    use IntOpcode::*;
-                    match op {
-                        Mul => a * b,
-                        Div => a / b,
-                        Mod => a % b,
-                        Add => a + b,
-                        Sub => a - b,
-                        BitAnd => a & b,
-                        BitOr => a | b,
-                        BitXor => a ^ b,
-                        BitShiftRight => a >> b,
-                        BitShiftLeft => a << b,
-                    }
-                }
-                IntExpr::Mem(e) => state.read_memory_int(e.evaluate(state)),
-                IntExpr::FromBool(b) => b.evaluate(state) as i32,
-                IntExpr::FromReal(r) => r.evaluate(state) as i32,
-                IntExpr::Variable(v) => state.get_int_variable_value(*v), 
-                IntExpr::Value(i) => *i,
-            }
-        }
-    }
-    pub enum RealOpcode {
-        Mul,
-        Div,
-        Mod,
-        Add,
-        Sub,
-    }
-    impl TryFrom<BinaryOpcode> for RealOpcode {
-        type Error = String;
-
-        fn try_from(value: BinaryOpcode) -> Result<Self, Self::Error> {
-            use RealOpcode::*;
-            match value {
-                BinaryOpcode::Mul => Ok(Mul),
-                BinaryOpcode::Div => Ok(Div),
-                BinaryOpcode::Mod => Ok(Mod),
-                BinaryOpcode::Add => Ok(Add),
-                BinaryOpcode::Sub => Ok(Sub),
-                _ => Err(format!("{value:?} is not a real operation")),
-            }
-        }
-    }
-    pub enum RealExpr {
-        Binary(Box<RealExpr>, RealOpcode, Box<RealExpr>),
-        Mem(Box<IntExpr>),
-        FromInt(Box<IntExpr>),
-        Variable(VariableReference),
-        Value(f64),
-    }
-    impl RealExpr {
-        fn evaluate(&self, state: &State) -> f64 {
-            match self {
-                RealExpr::Binary(a, op, b) => {
-                    let a = a.evaluate(state);
-                    let b = b.evaluate(state);
-                    use RealOpcode::*;
-                    match op {
-                        Mul => a * b,
-                        Div => a / b,
-                        Mod => a % b,
-                        Add => a + b,
-                        Sub => a - b,
-                    }
-                }
-                RealExpr::Mem(e) => state.read_memory_real(e.evaluate(state)),
-                RealExpr::FromInt(i) => i.evaluate(state) as f64,
-                RealExpr::Variable(v) => state.get_real_variable_value(*v),
-                RealExpr::Value(r) => *r,
-            }
-        }
-    }
-}
 
 #[derive(Debug)]
 pub enum Expr {
-    Operand(Operand),
-    Binary(Box<Expr>, Opcode, Box<Expr>),
+    Bool(BoolExpr),
+    Int(IntExpr),
+    Real(RealExpr),
+}
+impl From<BoolExpr> for Expr {
+    fn from(value: BoolExpr) -> Self {
+        Self::Bool(value)
+    }
+}
+impl From<IntExpr> for Expr {
+    fn from(value: IntExpr) -> Self {
+        Self::Int(value)
+    }
+}
+impl From<RealExpr> for Expr {
+    fn from(value: RealExpr) -> Self {
+        Self::Real(value)
+    }
+}
+#[derive(Debug)]
+enum ExprPair {
+    Bool(BoolExpr, BoolExpr),
+    Int(IntExpr, IntExpr),
+    Real(RealExpr, RealExpr),
 }
 impl Expr {
-    pub fn get_type(&self, state: &State) -> Type {
-        use Expr::*;
+    fn evaluate(&self, state: &State) -> Value {
         match self {
-            Operand(op) => op.get_type(state),
-            Binary(e, op, operand) => op.get_type(e.get_type(state), operand.get_type(state)),
+            Expr::Bool(e) => e.evaluate(state).into(),
+            Expr::Int(e) => e.evaluate(state).into(),
+            Expr::Real(e) => e.evaluate(state).into(),
         }
     }
-    fn evaluate(&self, state: &State) -> Value {
-        use Expr::*;
-        match self {
-            Operand(operand) => operand.evaluate(state),
-            Binary(e, opcode, operand) => {
-                opcode.evaluate(e.evaluate(state), operand.evaluate(state))
+    pub fn variable(v: VariableReference, state: &State) -> Expr {
+        match state.get_variable_type(v) {
+            Type::Boolean => BoolExpr::Variable(v).into(),
+            Type::Integer => IntExpr::Variable(v).into(),
+            Type::Real => RealExpr::Variable(v).into(),
+        }
+    }
+    pub fn mem(mem_type: Type, e: Expr) -> Expr {
+        match mem_type {
+            Type::Boolean => BoolExpr::Mem(Box::new(e.cast_int())).into(),
+            Type::Integer => IntExpr::Mem(Box::new(e.cast_int())).into(),
+            Type::Real => RealExpr::Mem(Box::new(e.cast_int())).into(),
+        }
+    }
+    pub fn value(v: Value) -> Expr {
+        match v {
+            Value::Integer(i) => IntExpr::Value(i).into(),
+            Value::Real(r) => RealExpr::Value(r).into(),
+            Value::Boolean(b) => BoolExpr::Value(b).into(),
+        }
+    }
+    pub fn binary(a: Expr, b: Expr, op: BinaryOpcode) -> Result<Expr, String> {
+        match a.coerce_equal(b) {
+            ExprPair::Bool(a, b) => op
+                .try_into()
+                .map(|op| BoolExpr::Binary(Box::new(a), op, Box::new(b)).into()),
+            ExprPair::Int(a, b) => {
+                let a = Box::new(a);
+                let b = Box::new(b);
+                match (op.try_into(), op.try_into()) {
+                    (Ok(op), _) => Ok(BoolExpr::CompareInt(a, op, b).into()),
+                    (_, Ok(op)) => Ok(IntExpr::Binary(a, op, b).into()),
+                    (Err(e1), Err(e2)) => Err(format!("{e1}, {e2}")),
+                }
+            }
+            ExprPair::Real(a, b) => {
+                let a = Box::new(a);
+                let b = Box::new(b);
+                match (op.try_into(), op.try_into()) {
+                    (Ok(op), _) => Ok(BoolExpr::CompareReal(a, op, b).into()),
+                    (_, Ok(op)) => Ok(RealExpr::Binary(a, op, b).into()),
+                    (Err(e1), Err(e2)) => Err(format!("{e1}, {e2}")),
+                }
             }
         }
     }
-    fn compile(&self, state: &State) -> String {
-        use Expr::*;
+    fn coerce_equal(self: Expr, b: Expr) -> ExprPair {
+        match self.get_type().max(b.get_type()) {
+            Type::Boolean => ExprPair::Bool(self.cast_bool(), b.cast_bool()),
+            Type::Integer => ExprPair::Int(self.cast_int(), b.cast_int()),
+            Type::Real => ExprPair::Real(self.cast_real(), b.cast_real()),
+        }
+    }
+    pub fn cast_bool(self) -> BoolExpr {
         match self {
-            Operand(operand) => operand.compile(state),
-            Binary(a, op, b) => op.compile(state, a, b),
+            Expr::Bool(e) => e,
+            Expr::Int(e) => BoolExpr::FromInt(Box::new(e)),
+            Expr::Real(e) => BoolExpr::FromInt(Box::new(IntExpr::FromReal(Box::new(e)))),
         }
     }
-    fn compile_cast_type(&self, typ: Type, state: &State) -> String {
-        use Type::*;
-        match typ {
-            Boolean => self.compile_cast_bool(state),
-            Integer => self.compile_cast_integer(state),
-            Real => self.compile_cast_real(state),
+    pub fn cast_int(self) -> IntExpr {
+        match self {
+            Expr::Bool(e) => IntExpr::FromBool(Box::new(e)),
+            Expr::Int(e) => e,
+            Expr::Real(e) => IntExpr::FromReal(Box::new(e)),
         }
     }
-    fn compile_cast_bool(&self, state: &State) -> String {
-        use Type::*;
-        match self.get_type(state) {
-            Boolean => self.compile(state),
-            Integer => format!("({}) != 0", self.compile(state)),
-            Real => format!("({}) != 0", self.compile_cast_integer(state)),
+    pub fn cast_real(self) -> RealExpr {
+        match self {
+            Expr::Bool(e) => RealExpr::FromInt(Box::new(IntExpr::FromBool(Box::new(e)))),
+            Expr::Int(e) => RealExpr::FromInt(Box::new(e)),
+            Expr::Real(e) => e,
         }
     }
-    fn compile_cast_integer(&self, state: &State) -> String {
-        use Type::*;
-        match self.get_type(state) {
-            Boolean | Real => format!("({}) as i32", self.compile(state)),
-            Integer => self.compile(state),
+    pub fn cast_type(self, new_type: Type) -> Self {
+        match new_type {
+            Type::Boolean => self.cast_bool().into(),
+            Type::Integer => self.cast_int().into(),
+            Type::Real => self.cast_real().into(),
         }
     }
-    fn compile_cast_real(&self, state: &State) -> String {
-        use Type::*;
-        match self.get_type(state) {
-            Boolean => format!("({}) as f64", self.compile_cast_integer(state)),
-            Integer => format!("({}) as f64", self.compile(state)),
-            Real => self.compile(state),
+    pub fn get_type(&self) -> Type {
+        match self {
+            Expr::Bool(_) => Type::Boolean,
+            Expr::Int(_) => Type::Integer,
+            Expr::Real(_) => Type::Real,
         }
     }
-    fn compile_coerce_equal(&self, other: &Expr, state: &State) -> (Type, (String, String)) {
-        let typ = self.get_type(state).max(other.get_type(state));
-        (
-            typ,
-            (
-                self.compile_cast_type(typ, state),
-                other.compile_cast_type(typ, state),
-            ),
-        )
+}
+#[derive(Debug)]
+pub enum CmpOpcode {
+    Equal,
+    NotEqual,
+    GreaterThan,
+    GreaterEqual,
+    LessThan,
+    LessThanEqual,
+}
+impl TryFrom<BinaryOpcode> for CmpOpcode {
+    type Error = String;
+    fn try_from(value: BinaryOpcode) -> Result<Self, Self::Error> {
+        use CmpOpcode::*;
+        match value {
+            BinaryOpcode::Equal => Ok(Equal),
+            BinaryOpcode::NotEqual => Ok(NotEqual),
+            BinaryOpcode::GreaterThan => Ok(GreaterThan),
+            BinaryOpcode::GreaterEqual => Ok(GreaterEqual),
+            BinaryOpcode::LessThan => Ok(LessThan),
+            BinaryOpcode::LessThanEqual => Ok(LessThanEqual),
+            _ => Err(format!("{value:?} is not a comparasion operation")),
+        }
+    }
+}
+#[derive(Debug)]
+pub enum BoolOpcode {
+    And,
+    Or,
+    Xor,
+}
+impl TryFrom<BinaryOpcode> for BoolOpcode {
+    type Error = String;
+    fn try_from(value: BinaryOpcode) -> Result<Self, Self::Error> {
+        use BoolOpcode::*;
+        match value {
+            BinaryOpcode::And => Ok(And),
+            BinaryOpcode::Or => Ok(Or),
+            BinaryOpcode::Xor => Ok(Xor),
+            _ => Err(format!("{value:?} is not a binary operation")),
+        }
+    }
+}
+#[derive(Debug)]
+pub enum BoolExpr {
+    CompareInt(Box<IntExpr>, CmpOpcode, Box<IntExpr>),
+    CompareReal(Box<RealExpr>, CmpOpcode, Box<RealExpr>),
+    Binary(Box<BoolExpr>, BoolOpcode, Box<BoolExpr>),
+    Mem(Box<IntExpr>),
+    FromInt(Box<IntExpr>),
+    Variable(VariableReference),
+    Value(bool),
+}
+impl BoolExpr {
+    fn evaluate(&self, state: &State) -> bool {
+        match self {
+            BoolExpr::CompareInt(a, op, b) => {
+                let a = a.evaluate(state);
+                let b = b.evaluate(state);
+                use CmpOpcode::*;
+                match op {
+                    Equal => a == b,
+                    NotEqual => a != b,
+                    GreaterThan => a > b,
+                    GreaterEqual => a >= b,
+                    LessThan => a < b,
+                    LessThanEqual => a <= b,
+                }
+            }
+            BoolExpr::CompareReal(a, op, b) => {
+                let a = a.evaluate(state);
+                let b = b.evaluate(state);
+                use CmpOpcode::*;
+                match op {
+                    Equal => a == b,
+                    NotEqual => a != b,
+                    GreaterThan => a > b,
+                    GreaterEqual => a >= b,
+                    LessThan => a < b,
+                    LessThanEqual => a <= b,
+                }
+            }
+            BoolExpr::Binary(a, op, b) => {
+                let a = a.evaluate(state);
+                let b = b.evaluate(state);
+                use BoolOpcode::*;
+                match op {
+                    And => a && b,
+                    Or => a || b,
+                    Xor => a != b,
+                }
+            }
+            BoolExpr::Mem(e) => state.read_memory_bool(e.evaluate(state)),
+            BoolExpr::FromInt(i) => i.evaluate(state) != 0,
+            BoolExpr::Variable(v) => state.get_bool_variable_value(*v),
+            BoolExpr::Value(b) => *b,
+        }
+    }
+}
+#[derive(Debug)]
+pub enum IntOpcode {
+    Mul,
+    Div,
+    Mod,
+    Add,
+    Sub,
+    BitAnd,
+    BitOr,
+    BitXor,
+    BitShiftRight,
+    BitShiftLeft,
+}
+impl TryFrom<BinaryOpcode> for IntOpcode {
+    type Error = String;
+    fn try_from(value: BinaryOpcode) -> Result<Self, Self::Error> {
+        use IntOpcode::*;
+        match value {
+            BinaryOpcode::Mul => Ok(Mul),
+            BinaryOpcode::Div => Ok(Div),
+            BinaryOpcode::Mod => Ok(Mod),
+            BinaryOpcode::Add => Ok(Add),
+            BinaryOpcode::Sub => Ok(Sub),
+            BinaryOpcode::BitAnd => Ok(BitAnd),
+            BinaryOpcode::BitOr => Ok(BitOr),
+            BinaryOpcode::BitXor => Ok(BitXor),
+            BinaryOpcode::BitShiftRight => Ok(BitShiftRight),
+            BinaryOpcode::BitShiftLeft => Ok(BitShiftLeft),
+            _ => Err(format!("{value:?} is not an integer operation")),
+        }
+    }
+}
+#[derive(Debug)]
+pub enum IntExpr {
+    Binary(Box<IntExpr>, IntOpcode, Box<IntExpr>),
+    Mem(Box<IntExpr>),
+    FromBool(Box<BoolExpr>),
+    FromReal(Box<RealExpr>),
+    Variable(VariableReference),
+    Value(i32),
+}
+impl IntExpr {
+    fn evaluate(&self, state: &State) -> i32 {
+        match self {
+            IntExpr::Binary(a, op, b) => {
+                let a = a.evaluate(state);
+                let b = b.evaluate(state);
+                use IntOpcode::*;
+                match op {
+                    Mul => a * b,
+                    Div => a / b,
+                    Mod => a % b,
+                    Add => a + b,
+                    Sub => a - b,
+                    BitAnd => a & b,
+                    BitOr => a | b,
+                    BitXor => a ^ b,
+                    BitShiftRight => a >> b,
+                    BitShiftLeft => a << b,
+                }
+            }
+            IntExpr::Mem(e) => state.read_memory_int(e.evaluate(state)),
+            IntExpr::FromBool(b) => b.evaluate(state) as i32,
+            IntExpr::FromReal(r) => r.evaluate(state) as i32,
+            IntExpr::Variable(v) => state.get_int_variable_value(*v),
+            IntExpr::Value(i) => *i,
+        }
+    }
+}
+#[derive(Debug)]
+pub enum RealOpcode {
+    Mul,
+    Div,
+    Mod,
+    Add,
+    Sub,
+}
+impl TryFrom<BinaryOpcode> for RealOpcode {
+    type Error = String;
+
+    fn try_from(value: BinaryOpcode) -> Result<Self, Self::Error> {
+        use RealOpcode::*;
+        match value {
+            BinaryOpcode::Mul => Ok(Mul),
+            BinaryOpcode::Div => Ok(Div),
+            BinaryOpcode::Mod => Ok(Mod),
+            BinaryOpcode::Add => Ok(Add),
+            BinaryOpcode::Sub => Ok(Sub),
+            _ => Err(format!("{value:?} is not a real operation")),
+        }
+    }
+}
+#[derive(Debug)]
+pub enum RealExpr {
+    Binary(Box<RealExpr>, RealOpcode, Box<RealExpr>),
+    Mem(Box<IntExpr>),
+    FromInt(Box<IntExpr>),
+    Variable(VariableReference),
+    Value(f64),
+}
+impl RealExpr {
+    fn evaluate(&self, state: &State) -> f64 {
+        match self {
+            RealExpr::Binary(a, op, b) => {
+                let a = a.evaluate(state);
+                let b = b.evaluate(state);
+                use RealOpcode::*;
+                match op {
+                    Mul => a * b,
+                    Div => a / b,
+                    Mod => a % b,
+                    Add => a + b,
+                    Sub => a - b,
+                }
+            }
+            RealExpr::Mem(e) => state.read_memory_real(e.evaluate(state)),
+            RealExpr::FromInt(i) => i.evaluate(state) as f64,
+            RealExpr::Variable(v) => state.get_real_variable_value(*v),
+            RealExpr::Value(r) => *r,
+        }
     }
 }

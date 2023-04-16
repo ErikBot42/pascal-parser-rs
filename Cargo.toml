@@ -7,6 +7,8 @@ edition = "2021"
 build = "build.rs"
 
 [dependencies]
+derive_more = "0.99.17"
+enum_dispatch = "0.3.11"
 lalrpop-util = { version = "0.19.9", features = ["lexer"] }
 regex = "1.7.3"
 

@@ -57,68 +57,62 @@ StatBlock: ast::StatList = {
 
 Stat: ast::Stat = {
     AssignStat => <>,
-    "while" <c:Expr> "do" <s:StatBlock> => ast::Stat::While(c, s),
-    "if" <c:Expr> "then" <s:StatBlock> => ast::Stat::If(c, s),
+    "while" <c:Expr> "do" <s:StatBlock> => ast::Stat::While(c.cast_bool(), s),
+    "if" <c:Expr> "then" <s:StatBlock> => ast::Stat::If(c.cast_bool(), s),
     "write" <e:Expr> => ast::Stat::Print(e),
     "writeLn" <e:Expr> => ast::Stat::PrintLn(e),
 }
 
-AssignStat: ast::Stat = { <a: Assignable> ":=" <e:Expr> =>? (a.get_type(state) == e.get_type(state)).then_some(ast::Stat::Assign(a, e)).ok_or_else(|| ParseError::User {error: "Invalid assign types" }) }
+AssignStat: ast::Stat = { 
+    <a: Assignable> ":=" <e:Expr> =>? ast::Stat::assign(a, e).map_err(|_| ParseError::User {error: "Invalid assign types" })
 
-Assignable: ast::Assignable = {
-    <v: Variable> => ast::Assignable::Variable(v),
-    <t: Type> "[" <e: Expr> "]" => ast::Assignable::Memory(t, e),
+    //(a.get_type(state) == e.get_type()).then_some(ast::Stat::Assign(a, e)) 
 }
 
-Variable: ast::VariableReference = { <i:Identifier> =>? state.get_variable(&i).ok_or_else(|| {ParseError::User {error: "Undefined variable"}}) }
+Assignable: ast::Assignable = {
+    <v: Variable> => ast::Assignable::variable(v, state),
+    <t: Type> "[" <e: Expr> "]" => ast::Assignable::memory(t, e, state),
+}
+
+Variable: ast::VariableReference = { 
+    <i:Identifier> =>? state.get_variable(&i).ok_or_else(|| {ParseError::User {error: "Undefined variable"}}) 
+}
 
 // ----------------------------------------------------------------------------
 
 Expr: ast::Expr = {
-    <o:Operand> => ast::Expr::Operand(o),
+    <o:Operand> => o,
     "(" <e:Expr> ")" => e,
-    <a:Expr> <o:Opcode> <b:Operand> => ast::Expr::Binary(Box::new(a), o, Box::new(ast::Expr::Operand(b))),
-    <a:Expr> <o:Opcode> "(" <b:Expr> ")" => ast::Expr::Binary(Box::new(a), o, Box::new(b)),
+    <a:Expr> <o:Opcode> <b:Operand> =>? ast::Expr::binary(a, b, o).map_err(|_| ParseError::User {error: "invalid operation"}),
+    <a:Expr> <o:Opcode> "(" <b:Expr> ")" =>? ast::Expr::binary(a, b, o).map_err(|_| ParseError::User {error: "invalid operation"}),
 }
 
-Opcode: ast::Opcode = {
-    "*" => ast::Opcode::Mul, 
-    "/" => ast::Opcode::Div,
-    "%" => ast::Opcode::Mod,
-    "+" => ast::Opcode::Add, 
-    "-" => ast::Opcode::Sub,
-    "==" => ast::Opcode::Equal,
-    "!=" => ast::Opcode::NotEqual,
-    ">" => ast::Opcode::GreaterThan,
-    ">=" => ast::Opcode::GreaterEqual,
-    "<" => ast::Opcode::LessThan,
-    "<=" => ast::Opcode::LessThanEqual,
-    "&&" => ast::Opcode::And,
-    "||" => ast::Opcode::Or,
-    "^^" => ast::Opcode::Xor,
-    "&" => ast::Opcode::BitAnd,
-    "|" => ast::Opcode::BitOr,
-    "^" => ast::Opcode::BitXor,
+Opcode: ast::BinaryOpcode= {
+    "*" => ast::BinaryOpcode::Mul, 
+    "/" => ast::BinaryOpcode::Div,
+    "%" => ast::BinaryOpcode::Mod,
+    "+" => ast::BinaryOpcode::Add, 
+    "-" => ast::BinaryOpcode::Sub,
+    "==" => ast::BinaryOpcode::Equal,
+    "!=" => ast::BinaryOpcode::NotEqual,
+    ">" => ast::BinaryOpcode::GreaterThan,
+    ">=" => ast::BinaryOpcode::GreaterEqual,
+    "<" => ast::BinaryOpcode::LessThan,
+    "<=" => ast::BinaryOpcode::LessThanEqual,
+    "&&" => ast::BinaryOpcode::And,
+    "||" => ast::BinaryOpcode::Or,
+    "^^" => ast::BinaryOpcode::Xor,
+    "&" => ast::BinaryOpcode::BitAnd,
+    "|" => ast::BinaryOpcode::BitOr,
+    "^" => ast::BinaryOpcode::BitXor,
 }
 
 
-Operand: ast::Operand = {
-    <v:Variable> => ast::Operand::Variable(v),
-    <v:Value> => ast::Operand::Value(v),
-    <t: Type> "(" <e:Expr> ")" => ast::Operand::UnaryOp(
-        match t {
-            ast::Type::Boolean => ast::UnaryOpcode::CastBool,
-            ast::Type::Integer => ast::UnaryOpcode::CastInt,            
-            ast::Type::Real => ast::UnaryOpcode::CastReal,
-        }, Box::new(e)
-    ),
-    <t: Type> "[" <e:Expr> "]" => ast::Operand::UnaryOp(
-        match t {
-            ast::Type::Boolean => ast::UnaryOpcode::MemBool,
-            ast::Type::Integer => ast::UnaryOpcode::MemInt,            
-            ast::Type::Real => ast::UnaryOpcode::MemReal,
-        }, Box::new(e)
-    ),
+Operand: ast::Expr = {
+    <v:Variable> => ast::Expr::variable(v, state),
+    <v:Value> => ast::Expr::value(v),
+    <t:Type> "(" <e:Expr> ")" => e.cast_type(t),
+    <t:Type> "[" <e:Expr> "]" => ast::Expr::mem(t, e),
 }
 
 Value: ast::Value =  {
