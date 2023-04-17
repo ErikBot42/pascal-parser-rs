@@ -90,89 +90,59 @@ impl State {
             max_size,
         }
     }
-    pub fn push_variable(
+    pub(crate) fn push_variable(
         &mut self,
         name: String,
         variable_type: Type,
     ) -> Option<VariableReference> {
         self.variable_table.push(name, variable_type)
     }
-    pub fn set_variable_value(&mut self, v: VariableReference, val: Value) {
-        self.variable_table.set_value(v, val);
-    }
-    pub fn get_variable_value(&self, v: VariableReference) -> Value {
-        self.variable_table.get_value(v)
-    }
-    pub fn get_variable(&self, name: &String) -> Option<VariableReference> {
+    pub(crate) fn get_variable(&self, name: &String) -> Option<VariableReference> {
         self.variable_table.get(name)
     }
-    pub fn get_variable_type(&self, v: VariableReference) -> Type {
+    fn get_variable_type(&self, v: VariableReference) -> Type {
         self.variable_table.get_type(v)
     }
-    pub fn read_memory(&self, typ: Type, addr: Value) -> Value {
-        use Type::*;
-        let addr: usize = addr.into();
-        match typ {
-            Boolean => self.mem_bool[addr].into(),
-            Integer => self.mem_int[addr].into(),
-            Real => self.mem_real[addr].into(),
-        }
+    fn set_bool_variable_value(&mut self, v: VariableReference, val: bool) {
+        debug_assert_eq!(v.1, Type::Boolean);
+        self.variable_table.set_bool(v.0, val);
     }
-    pub fn write_memory(&mut self, typ: Type, addr: Value, val: Value) {
-        use Type::*;
-        let addr: usize = addr.into();
-        match typ {
-            Boolean => self.mem_bool[addr] = val.into(),
-            Integer => self.mem_int[addr] = val.into(),
-            Real => self.mem_real[addr] = val.into(),
-        }
+    fn set_int_variable_value(&mut self, v: VariableReference, val: i32) {
+        debug_assert_eq!(v.1, Type::Integer);
+        self.variable_table.set_int(v.0, val);
     }
-    pub fn set_bool_variable_value(&mut self, v: VariableReference, val: bool) {
-        self.set_variable_value(v, Value::Boolean(val));
+    fn set_real_variable_value(&mut self, v: VariableReference, val: f64) {
+        debug_assert_eq!(v.1, Type::Real);
+        self.variable_table.set_real(v.0, val);
     }
-    pub fn set_int_variable_value(&mut self, v: VariableReference, val: i32) {
-        self.set_variable_value(v, Value::Integer(val));
+    fn get_int_variable_value(&self, v: VariableReference) -> i32 {
+        debug_assert_eq!(v.1, Type::Integer);
+        self.variable_table.get_int(v.0)
     }
-    pub fn set_real_variable_value(&mut self, v: VariableReference, val: f64) {
-        self.set_variable_value(v, Value::Real(val));
+    fn get_bool_variable_value(&self, v: VariableReference) -> bool {
+        debug_assert_eq!(v.1, Type::Boolean);
+        self.variable_table.get_bool(v.0)
     }
-    pub fn get_int_variable_value(&self, v: VariableReference) -> i32 {
-        if let Value::Integer(i) = self.get_variable_value(v) {
-            i
-        } else {
-            panic!("internal error")
-        }
+    fn get_real_variable_value(&self, v: VariableReference) -> f64 {
+        debug_assert_eq!(v.1, Type::Real);
+        self.variable_table.get_real(v.0)
     }
-    pub fn get_bool_variable_value(&self, v: VariableReference) -> bool {
-        if let Value::Boolean(i) = self.get_variable_value(v) {
-            i
-        } else {
-            panic!("internal error")
-        }
-    }
-    pub fn get_real_variable_value(&self, v: VariableReference) -> f64 {
-        if let Value::Real(i) = self.get_variable_value(v) {
-            i
-        } else {
-            panic!("internal error")
-        }
-    }
-    pub fn read_memory_bool(&self, addr: i32) -> bool {
+    fn read_memory_bool(&self, addr: i32) -> bool {
         self.mem_bool[addr as usize]
     }
-    pub fn read_memory_int(&self, addr: i32) -> i32 {
+    fn read_memory_int(&self, addr: i32) -> i32 {
         self.mem_int[addr as usize]
     }
-    pub fn read_memory_real(&self, addr: i32) -> f64 {
+    fn read_memory_real(&self, addr: i32) -> f64 {
         self.mem_real[addr as usize]
     }
-    pub fn write_memory_bool(&mut self, addr: i32, data: bool) {
+    fn write_memory_bool(&mut self, addr: i32, data: bool) {
         self.mem_bool[addr as usize] = data;
     }
-    pub fn write_memory_int(&mut self, addr: i32, data: i32) {
+    fn write_memory_int(&mut self, addr: i32, data: i32) {
         self.mem_int[addr as usize] = data;
     }
-    pub fn write_memory_real(&mut self, addr: i32, data: f64) {
+    fn write_memory_real(&mut self, addr: i32, data: f64) {
         self.mem_real[addr as usize] = data;
     }
 }
@@ -205,23 +175,28 @@ impl VariableTable {
         if self.table.get(&name).is_some() {
             None
         } else {
-            let id = VariableReference(self.variables.len(), variable_type);
-            self.table.insert(name.clone(), id);
             use Type::*;
+            let index;
             match variable_type {
                 Boolean => {
+                    index = self.bools.len();
                     self.bools.push(Default::default());
-                    self.bools_names.push(name.clone())
+                    &mut self.bools_names
                 }
                 Integer => {
+                    index = self.ints.len();
                     self.ints.push(Default::default());
-                    self.ints_names.push(name.clone())
+                    &mut self.ints_names
                 }
                 Real => {
+                    index = self.reals.len();
                     self.reals.push(Default::default());
-                    self.reals_names.push(name.clone())
+                    &mut self.reals_names
                 }
             }
+            .push(name.clone());
+            let id = VariableReference(index, variable_type);
+            self.table.insert(name.clone(), id);
             self.variables
                 .push((name, Value::default_from_type(variable_type)));
             Some(id)
@@ -230,17 +205,34 @@ impl VariableTable {
     fn get(&self, name: &String) -> Option<VariableReference> {
         self.table.get(name).copied()
     }
-    pub fn get_type(&self, v: VariableReference) -> Type {
-        self.variables[v.0].1.get_type()
+    fn get_type(&self, v: VariableReference) -> Type {
+        v.1
     }
-    fn get_value(&self, v: VariableReference) -> Value {
-        self.variables[v.0].1
+    fn get_int(&self, v: usize) -> i32 {
+        self.ints[v]
+    }
+    fn get_real(&self, v: usize) -> f64 {
+        self.reals[v]
+    }
+    fn get_bool(&self, v: usize) -> bool {
+        self.bools[v]
+    }
+    fn set_int(&mut self, v: usize, val: i32) {
+        self.ints[v] = val;
+    }
+    fn set_real(&mut self, v: usize, val: f64) {
+        self.reals[v] = val;
+    }
+    fn set_bool(&mut self, v: usize, val: bool) {
+        self.bools[v] = val;
     }
     fn get_name(&self, v: VariableReference) -> String {
-        self.variables[v.0].0.clone()
-    }
-    fn set_value(&mut self, v: VariableReference, val: Value) {
-        self.variables[v.0].1 = val.coerce_into(self.variables[v.0].1.get_type());
+        use Type::*;
+        match v.1 {
+            Boolean => self.bools_names[v.0].clone(),
+            Integer => self.ints_names[v.0].clone(),
+            Real => self.reals_names[v.0].clone(),
+        }
     }
     fn compile(&self) -> String {
         let mut buffer = String::default();
@@ -260,9 +252,6 @@ impl VariableTable {
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub struct VariableReference(usize, Type);
 impl VariableReference {
-    pub fn get_type(self, state: &State) -> Type {
-        state.get_variable_type(self)
-    }
     fn compile(self, state: &State) -> String {
         state.variable_table.variables[self.0].0.clone()
     }
@@ -284,7 +273,7 @@ impl BoolAssignable {
     fn compile(&self, state: &State) -> String {
         use BoolAssignable::*;
         match self {
-            Mem(e) => format!("boolean[{}]", e.compile(state)),
+            Mem(e) => format!("{}[{}]", Type::Boolean.as_pascal_string(), e.compile(state)),
             Variable(v) => v.compile(state),
         }
     }
@@ -305,7 +294,7 @@ impl IntAssignable {
     fn compile(&self, state: &State) -> String {
         use IntAssignable::*;
         match self {
-            Mem(e) => format!("integer[{}]", e.compile(state)),
+            Mem(e) => format!("{}[{}]", Type::Integer.as_pascal_string(), e.compile(state)),
             Variable(v) => v.compile(state),
         }
     }
@@ -326,7 +315,7 @@ impl RealAssignable {
     fn compile(&self, state: &State) -> String {
         use RealAssignable::*;
         match self {
-            Mem(e) => format!("real[{}]", e.compile(state)),
+            Mem(e) => format!("{}[{}]", Type::Real.as_pascal_string(), e.compile(state)),
             Variable(v) => v.compile(state),
         }
     }
@@ -339,25 +328,18 @@ pub enum Assignable {
     Real(RealAssignable),
 }
 impl Assignable {
-    pub fn variable(v: VariableReference, state: &State) -> Self {
+    pub(crate) fn variable(v: VariableReference, state: &State) -> Self {
         match state.get_variable_type(v) {
             Type::Boolean => BoolAssignable::Variable(v).into(),
             Type::Integer => IntAssignable::Variable(v).into(),
             Type::Real => RealAssignable::Variable(v).into(),
         }
     }
-    pub fn memory(t: Type, e: Expr, state: &State) -> Self {
+    pub(crate) fn memory(t: Type, e: Expr) -> Self {
         match t {
             Type::Boolean => BoolAssignable::Mem(e.cast_int()).into(),
             Type::Integer => IntAssignable::Mem(e.cast_int()).into(),
             Type::Real => RealAssignable::Mem(e.cast_int()).into(),
-        }
-    }
-    const fn get_type(&self) -> Type {
-        match self {
-            Assignable::Bool(_) => Type::Boolean,
-            Assignable::Int(_) => Type::Integer,
-            Assignable::Real(_) => Type::Real,
         }
     }
 }
@@ -373,7 +355,7 @@ pub enum Stat {
     PrintLn(Expr),
 }
 impl Stat {
-    pub fn assign(a: Assignable, e: Expr) -> Result<Self, String> {
+    pub(crate) fn assign(a: Assignable, e: Expr) -> Result<Self, String> {
         match (a, e) {
             (Assignable::Bool(a), Expr::Bool(e)) => Ok(Stat::AssignBool(a, e)),
             (Assignable::Int(a), Expr::Int(e)) => Ok(Stat::AssignInt(a, e)),
@@ -418,9 +400,6 @@ impl Stat {
 #[derive(Debug, Default)]
 pub struct StatList(pub Vec<Stat>);
 impl StatList {
-    pub fn new() -> Self {
-        Self::default()
-    }
     fn execute(&self, state: &mut State) {
         self.0.iter().for_each(|s| s.execute(state));
     }
@@ -486,14 +465,6 @@ impl Value {
             Boolean => Value::Boolean(false),
             Integer => Value::Integer(0),
             Real => Value::Real(0.0),
-        }
-    }
-    const fn coerce_into(self, typ: Type) -> Self {
-        use Type::*;
-        match typ {
-            Boolean => Value::Boolean(self.coerce_bool()),
-            Integer => Value::Integer(self.coerce_integer()),
-            Real => Value::Real(self.coerce_real()),
         }
     }
     const fn coerce_real(self) -> f64 {
@@ -588,28 +559,28 @@ impl Expr {
             Expr::Real(e) => e.compile(state),
         }
     }
-    pub fn variable(v: VariableReference, state: &State) -> Expr {
+    pub(crate) fn variable(v: VariableReference, state: &State) -> Expr {
         match state.get_variable_type(v) {
             Type::Boolean => BoolExpr::Variable(v).into(),
             Type::Integer => IntExpr::Variable(v).into(),
             Type::Real => RealExpr::Variable(v).into(),
         }
     }
-    pub fn mem(mem_type: Type, e: Expr) -> Expr {
+    pub(crate) fn mem(mem_type: Type, e: Expr) -> Expr {
         match mem_type {
             Type::Boolean => BoolExpr::Mem(Box::new(e.cast_int())).into(),
             Type::Integer => IntExpr::Mem(Box::new(e.cast_int())).into(),
             Type::Real => RealExpr::Mem(Box::new(e.cast_int())).into(),
         }
     }
-    pub fn value(v: Value) -> Expr {
+    pub(crate) fn value(v: Value) -> Expr {
         match v {
             Value::Integer(i) => IntExpr::Value(i).into(),
             Value::Real(r) => RealExpr::Value(r).into(),
             Value::Boolean(b) => BoolExpr::Value(b).into(),
         }
     }
-    pub fn binary(a: Expr, b: Expr, op: BinaryOpcode) -> Result<Expr, String> {
+    pub(crate) fn binary(a: Expr, b: Expr, op: BinaryOpcode) -> Result<Expr, String> {
         match a.coerce_equal(b) {
             ExprPair::Bool(a, b) => op
                 .try_into()
@@ -641,36 +612,35 @@ impl Expr {
             Type::Real => ExprPair::Real(self.cast_real(), b.cast_real()),
         }
     }
-    pub fn cast_bool(self) -> BoolExpr {
+    pub(crate) fn cast_bool(self) -> BoolExpr {
         match self {
             Expr::Bool(e) => e,
             Expr::Int(e) => BoolExpr::FromInt(Box::new(e)),
             Expr::Real(e) => BoolExpr::FromInt(Box::new(IntExpr::FromReal(Box::new(e)))),
         }
     }
-    pub fn cast_int(self) -> IntExpr {
+    fn cast_int(self) -> IntExpr {
         match self {
             Expr::Bool(e) => IntExpr::FromBool(Box::new(e)),
             Expr::Int(e) => e,
             Expr::Real(e) => IntExpr::FromReal(Box::new(e)),
         }
     }
-    pub fn cast_real(self) -> RealExpr {
+    fn cast_real(self) -> RealExpr {
         match self {
             Expr::Bool(e) => RealExpr::FromInt(Box::new(IntExpr::FromBool(Box::new(e)))),
             Expr::Int(e) => RealExpr::FromInt(Box::new(e)),
             Expr::Real(e) => e,
         }
     }
-    #[must_use]
-    pub fn cast_type(self, new_type: Type) -> Self {
+    pub(crate) fn cast_type(self, new_type: Type) -> Self {
         match new_type {
             Type::Boolean => self.cast_bool().into(),
             Type::Integer => self.cast_int().into(),
             Type::Real => self.cast_real().into(),
         }
     }
-    pub const fn get_type(&self) -> Type {
+    const fn get_type(&self) -> Type {
         match self {
             Expr::Bool(_) => Type::Boolean,
             Expr::Int(_) => Type::Integer,
@@ -814,7 +784,7 @@ impl BoolExpr {
                 },
                 b.compile(state),
             ),
-            Mem(e) => format!("boolean[{}]", e.compile(state)),
+            Mem(e) => format!("{}[{}]", Type::Boolean.as_pascal_string(), e.compile(state)),
             FromInt(e) => format!("({}) != 0", e.compile(state)),
             Variable(v) => state.variable_table.get_name(*v),
             Value(v) => format!("{v:?}"),
@@ -915,7 +885,7 @@ impl IntExpr {
                 let b = b.compile(state);
                 format!("({}) {} ({})", a, op.as_str(), b)
             }
-            Mem(e) => format!("integer[{}]", e.compile(state)),
+            Mem(e) => format!("{}[{}]", Type::Integer.as_pascal_string(), e.compile(state)),
             FromBool(e) => format!("({}) as i32", e.compile(state)),
             FromReal(e) => format!("({}) as i32", e.compile(state)),
             Variable(v) => state.variable_table.get_name(*v),
@@ -997,10 +967,11 @@ impl RealExpr {
                 let b = b.compile(state);
                 format!("({}) {} ({})", a, op.as_str(), b)
             }
-            Mem(e) => format!("real[{}]", e.compile(state)),
+            Mem(e) => format!("{}[{}]", Type::Real.as_pascal_string(), e.compile(state)),
             FromInt(e) => format!("({}) as f64", e.compile(state)),
             Variable(v) => state.variable_table.get_name(*v),
             Value(v) => format!("{v:?}"),
         }
     }
 }
+

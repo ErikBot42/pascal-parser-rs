@@ -71,7 +71,7 @@ AssignStat: ast::Stat = {
 
 Assignable: ast::Assignable = {
     <v: Variable> => ast::Assignable::variable(v, state),
-    <t: Type> "[" <e: Expr> "]" => ast::Assignable::memory(t, e, state),
+    <t: Type> "[" <e: Expr> "]" => ast::Assignable::memory(t, e),
 }
 
 Variable: ast::VariableReference = { 
