@@ -329,17 +329,19 @@ pub enum Assignable {
 }
 impl Assignable {
     pub(crate) fn variable(v: VariableReference, state: &State) -> Self {
+        use Type::*;
         match state.get_variable_type(v) {
-            Type::Boolean => BoolAssignable::Variable(v).into(),
-            Type::Integer => IntAssignable::Variable(v).into(),
-            Type::Real => RealAssignable::Variable(v).into(),
+            Boolean => BoolAssignable::Variable(v).into(),
+            Integer => IntAssignable::Variable(v).into(),
+            Real => RealAssignable::Variable(v).into(),
         }
     }
     pub(crate) fn memory(t: Type, e: Expr) -> Self {
+        use Type::*;
         match t {
-            Type::Boolean => BoolAssignable::Mem(e.cast_int()).into(),
-            Type::Integer => IntAssignable::Mem(e.cast_int()).into(),
-            Type::Real => RealAssignable::Mem(e.cast_int()).into(),
+            Boolean => BoolAssignable::Mem(e.cast_int()).into(),
+            Integer => IntAssignable::Mem(e.cast_int()).into(),
+            Real => RealAssignable::Mem(e.cast_int()).into(),
         }
     }
 }
@@ -538,65 +540,67 @@ pub enum Expr {
     Int(IntExpr),
     Real(RealExpr),
 }
-#[derive(Debug)]
-enum ExprPair {
-    Bool(BoolExpr, BoolExpr),
-    Int(IntExpr, IntExpr),
-    Real(RealExpr, RealExpr),
-}
 impl Expr {
     fn evaluate(&self, state: &State) -> Value {
+        use Expr::*;
         match self {
-            Expr::Bool(e) => e.evaluate(state).into(),
-            Expr::Int(e) => e.evaluate(state).into(),
-            Expr::Real(e) => e.evaluate(state).into(),
+            Bool(e) => e.evaluate(state).into(),
+            Int(e) => e.evaluate(state).into(),
+            Real(e) => e.evaluate(state).into(),
         }
     }
     fn compile(&self, state: &State) -> String {
+        use Expr::*;
         match self {
-            Expr::Bool(e) => e.compile(state),
-            Expr::Int(e) => e.compile(state),
-            Expr::Real(e) => e.compile(state),
+            Bool(e) => e.compile(state),
+            Int(e) => e.compile(state),
+            Real(e) => e.compile(state),
         }
     }
     pub(crate) fn variable(v: VariableReference, state: &State) -> Expr {
+        use Type::*;
         match state.get_variable_type(v) {
-            Type::Boolean => BoolExpr::Variable(v).into(),
-            Type::Integer => IntExpr::Variable(v).into(),
-            Type::Real => RealExpr::Variable(v).into(),
+            Boolean => BoolExpr::Variable(v).into(),
+            Integer => IntExpr::Variable(v).into(),
+            Real => RealExpr::Variable(v).into(),
         }
     }
     pub(crate) fn mem(mem_type: Type, e: Expr) -> Expr {
+        use Type::*;
         match mem_type {
-            Type::Boolean => BoolExpr::Mem(Box::new(e.cast_int())).into(),
-            Type::Integer => IntExpr::Mem(Box::new(e.cast_int())).into(),
-            Type::Real => RealExpr::Mem(Box::new(e.cast_int())).into(),
+            Boolean => BoolExpr::Mem(Box::new(e.cast_int())).into(),
+            Integer => IntExpr::Mem(Box::new(e.cast_int())).into(),
+            Real => RealExpr::Mem(Box::new(e.cast_int())).into(),
         }
     }
     pub(crate) fn value(v: Value) -> Expr {
+        use Value::*;
         match v {
-            Value::Integer(i) => IntExpr::Value(i).into(),
-            Value::Real(r) => RealExpr::Value(r).into(),
-            Value::Boolean(b) => BoolExpr::Value(b).into(),
+            Integer(i) => IntExpr::Value(i).into(),
+            Real(r) => RealExpr::Value(r).into(),
+            Boolean(b) => BoolExpr::Value(b).into(),
         }
     }
     pub(crate) fn binary(a: Expr, b: Expr, op: BinaryOpcode) -> Result<Expr, String> {
-        match a.coerce_equal(b) {
-            ExprPair::Bool(a, b) => op
-                .try_into()
-                .map(|op| BoolExpr::Binary(Box::new(a), op, Box::new(b)).into()),
-            ExprPair::Int(a, b) => {
-                let a = Box::new(a);
-                let b = Box::new(b);
+        use Type::*;
+        match a.get_type().max(b.get_type()) {
+            Boolean => {
+                let a = Box::new(a.cast_bool());
+                let b = Box::new(b.cast_bool());
+                op.try_into().map(|op| BoolExpr::Binary(a, op, b).into())
+            }
+            Integer => {
+                let a = Box::new(a.cast_int());
+                let b = Box::new(b.cast_int());
                 match (op.try_into(), op.try_into()) {
                     (Ok(op), _) => Ok(BoolExpr::CompareInt(a, op, b).into()),
                     (_, Ok(op)) => Ok(IntExpr::Binary(a, op, b).into()),
                     (Err(e1), Err(e2)) => Err(format!("{e1}, {e2}")),
                 }
             }
-            ExprPair::Real(a, b) => {
-                let a = Box::new(a);
-                let b = Box::new(b);
+            Real => {
+                let a = Box::new(a.cast_real());
+                let b = Box::new(b.cast_real());
                 match (op.try_into(), op.try_into()) {
                     (Ok(op), _) => Ok(BoolExpr::CompareReal(a, op, b).into()),
                     (_, Ok(op)) => Ok(RealExpr::Binary(a, op, b).into()),
@@ -605,46 +609,44 @@ impl Expr {
             }
         }
     }
-    fn coerce_equal(self: Expr, b: Expr) -> ExprPair {
-        match self.get_type().max(b.get_type()) {
-            Type::Boolean => ExprPair::Bool(self.cast_bool(), b.cast_bool()),
-            Type::Integer => ExprPair::Int(self.cast_int(), b.cast_int()),
-            Type::Real => ExprPair::Real(self.cast_real(), b.cast_real()),
-        }
-    }
     pub(crate) fn cast_bool(self) -> BoolExpr {
+        use Expr::*;
         match self {
-            Expr::Bool(e) => e,
-            Expr::Int(e) => BoolExpr::FromInt(Box::new(e)),
-            Expr::Real(e) => BoolExpr::FromInt(Box::new(IntExpr::FromReal(Box::new(e)))),
+            Bool(e) => e,
+            Int(e) => BoolExpr::FromInt(Box::new(e)),
+            Real(e) => BoolExpr::FromInt(Box::new(IntExpr::FromReal(Box::new(e)))),
         }
     }
     fn cast_int(self) -> IntExpr {
+        use Expr::*;
         match self {
-            Expr::Bool(e) => IntExpr::FromBool(Box::new(e)),
-            Expr::Int(e) => e,
-            Expr::Real(e) => IntExpr::FromReal(Box::new(e)),
+            Bool(e) => IntExpr::FromBool(Box::new(e)),
+            Int(e) => e,
+            Real(e) => IntExpr::FromReal(Box::new(e)),
         }
     }
     fn cast_real(self) -> RealExpr {
+        use Expr::*;
         match self {
-            Expr::Bool(e) => RealExpr::FromInt(Box::new(IntExpr::FromBool(Box::new(e)))),
-            Expr::Int(e) => RealExpr::FromInt(Box::new(e)),
-            Expr::Real(e) => e,
+            Bool(e) => RealExpr::FromInt(Box::new(IntExpr::FromBool(Box::new(e)))),
+            Int(e) => RealExpr::FromInt(Box::new(e)),
+            Real(e) => e,
         }
     }
     pub(crate) fn cast_type(self, new_type: Type) -> Self {
+        use Type::*;
         match new_type {
-            Type::Boolean => self.cast_bool().into(),
-            Type::Integer => self.cast_int().into(),
-            Type::Real => self.cast_real().into(),
+            Boolean => self.cast_bool().into(),
+            Integer => self.cast_int().into(),
+            Real => self.cast_real().into(),
         }
     }
     const fn get_type(&self) -> Type {
+        use Expr::*;
         match self {
-            Expr::Bool(_) => Type::Boolean,
-            Expr::Int(_) => Type::Integer,
-            Expr::Real(_) => Type::Real,
+            Bool(_) => Type::Boolean,
+            Int(_) => Type::Integer,
+            Real(_) => Type::Real,
         }
     }
 }
@@ -715,8 +717,9 @@ pub enum BoolExpr {
 }
 impl BoolExpr {
     fn evaluate(&self, state: &State) -> bool {
+        use BoolExpr::*;
         match self {
-            BoolExpr::CompareInt(a, op, b) => {
+            CompareInt(a, op, b) => {
                 let a = a.evaluate(state);
                 let b = b.evaluate(state);
                 use CmpOpcode::*;
@@ -729,7 +732,7 @@ impl BoolExpr {
                     LessThanEqual => a <= b,
                 }
             }
-            BoolExpr::CompareReal(a, op, b) => {
+            CompareReal(a, op, b) => {
                 let a = a.evaluate(state);
                 let b = b.evaluate(state);
                 use CmpOpcode::*;
@@ -742,7 +745,7 @@ impl BoolExpr {
                     LessThanEqual => a <= b,
                 }
             }
-            BoolExpr::Binary(a, op, b) => {
+            Binary(a, op, b) => {
                 let a = a.evaluate(state);
                 let b = b.evaluate(state);
                 use BoolOpcode::*;
@@ -752,10 +755,10 @@ impl BoolExpr {
                     Xor => a != b,
                 }
             }
-            BoolExpr::Mem(e) => state.read_memory_bool(e.evaluate(state)),
-            BoolExpr::FromInt(i) => i.evaluate(state) != 0,
-            BoolExpr::Variable(v) => state.get_bool_variable_value(*v),
-            BoolExpr::Value(b) => *b,
+            Mem(e) => state.read_memory_bool(e.evaluate(state)),
+            FromInt(i) => i.evaluate(state) != 0,
+            Variable(v) => state.get_bool_variable_value(*v),
+            Value(b) => *b,
         }
     }
     fn compile(&self, state: &State) -> String {
@@ -974,4 +977,3 @@ impl RealExpr {
         }
     }
 }
-
