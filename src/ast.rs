@@ -14,14 +14,17 @@
 #![allow(clippy::exhaustive_structs)]
 #![allow(clippy::shadow_reuse)]
 #![allow(clippy::shadow_unrelated)]
+#![allow(clippy::cast_lossless)]
+#![allow(clippy::missing_inline_in_public_items)]
 // review later:
 #![allow(clippy::print_stdout)]
 #![allow(clippy::indexing_slicing)]
+#![allow(clippy::map_err_ignore)]
 
 use core::fmt::Write as _;
 use std::collections::HashMap;
 extern crate derive_more;
-use derive_more::{Display, From, Into};
+use derive_more::{Display, From};
 
 const UNCHECKED_INDEXING: bool = true;
 
@@ -36,6 +39,7 @@ impl Prog {
         Self { name, stat_list }
     }
     pub fn execute(&self, state: &mut State) {
+        println!("Running program {}", self.name);
         self.stat_list.execute(state);
     }
     pub fn compile(&self, state: &State) -> String {
@@ -177,20 +181,47 @@ impl State {
 pub struct VariableTable {
     table: HashMap<String, VariableReference>,
     variables: Vec<(String, Value)>,
+    reals_names: Vec<String>,
+    reals: Vec<f64>,
+    ints_names: Vec<String>,
+    ints: Vec<i32>,
+    bools_names: Vec<String>,
+    bools: Vec<bool>,
 }
 impl VariableTable {
     fn new() -> Self {
         Self {
             table: HashMap::default(),
             variables: Vec::default(),
+            reals: Vec::default(),
+            reals_names: Vec::default(),
+            ints: Vec::default(),
+            ints_names: Vec::default(),
+            bools: Vec::default(),
+            bools_names: Vec::default(),
         }
     }
     fn push(&mut self, name: String, variable_type: Type) -> Option<VariableReference> {
         if self.table.get(&name).is_some() {
             None
         } else {
-            let id = VariableReference(self.variables.len());
+            let id = VariableReference(self.variables.len(), variable_type);
             self.table.insert(name.clone(), id);
+            use Type::*;
+            match variable_type {
+                Boolean => {
+                    self.bools.push(Default::default());
+                    self.bools_names.push(name.clone())
+                }
+                Integer => {
+                    self.ints.push(Default::default());
+                    self.ints_names.push(name.clone())
+                }
+                Real => {
+                    self.reals.push(Default::default());
+                    self.reals_names.push(name.clone())
+                }
+            }
             self.variables
                 .push((name, Value::default_from_type(variable_type)));
             Some(id)
@@ -227,7 +258,7 @@ impl VariableTable {
     }
 }
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
-pub struct VariableReference(usize);
+pub struct VariableReference(usize, Type);
 impl VariableReference {
     pub fn get_type(self, state: &State) -> Type {
         state.get_variable_type(self)
@@ -254,7 +285,7 @@ impl BoolAssignable {
         use BoolAssignable::*;
         match self {
             Mem(e) => format!("boolean[{}]", e.compile(state)),
-            Variable(v) => state.variable_table.get_name(*v),
+            Variable(v) => v.compile(state),
         }
     }
 }
@@ -275,7 +306,7 @@ impl IntAssignable {
         use IntAssignable::*;
         match self {
             Mem(e) => format!("integer[{}]", e.compile(state)),
-            Variable(v) => state.variable_table.get_name(*v),
+            Variable(v) => v.compile(state),
         }
     }
 }
@@ -296,7 +327,7 @@ impl RealAssignable {
         use RealAssignable::*;
         match self {
             Mem(e) => format!("real[{}]", e.compile(state)),
-            Variable(v) => state.variable_table.get_name(*v),
+            Variable(v) => v.compile(state),
         }
     }
 }
@@ -376,8 +407,8 @@ impl Stat {
             AssignBool(a, e) => format!("{} = {};\n", a.compile(state), e.compile(state)),
             AssignReal(a, e) => format!("{} = {};\n", a.compile(state), e.compile(state)),
             AssignInt(a, e) => format!("{} = {};\n", a.compile(state), e.compile(state)),
-            If(e, s) => format!("if {} {{\n {} }}\n", e.compile(state), s.compile(state)),
-            While(e, s) => format!("while {} {{\n {} }}\n", e.compile(state), s.compile(state)),
+            If(e, s) => format!("if {} {{\n{}}}\n", e.compile(state), s.compile(state)),
+            While(e, s) => format!("while {} {{\n{}}}\n", e.compile(state), s.compile(state)),
             Print(e) => format!("print!(\"{{:?}}\"{});\n", e.compile(state)),
             PrintLn(e) => format!("println!(\"{{:?}}\"{});\n", e.compile(state)),
         }
@@ -394,22 +425,17 @@ impl StatList {
         self.0.iter().for_each(|s| s.execute(state));
     }
     fn compile(&self, state: &State) -> String {
-        format!(
-            "{}{}{}",
-            "{\n",
-            self.0
-                .iter()
-                .map(|statement| statement.compile(state))
-                .fold(String::new(), |mut a, b| {
-                    a.push_str(&b);
-                    a
-                }),
-            "}\n"
-        )
+        self.0
+            .iter()
+            .map(|statement| statement.compile(state))
+            .fold(String::new(), |mut a, b| {
+                a.push_str(&b);
+                a
+            })
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialOrd, Ord, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialOrd, Ord, Eq, PartialEq, Hash)]
 pub enum Type {
     Boolean,
     Integer,
@@ -662,7 +688,7 @@ pub enum CmpOpcode {
     LessThanEqual,
 }
 impl CmpOpcode {
-    fn as_str(&self) -> &'static str {
+    const fn as_str(&self) -> &'static str {
         use CmpOpcode::*;
         match self {
             Equal => "==",
@@ -788,10 +814,10 @@ impl BoolExpr {
                 },
                 b.compile(state),
             ),
-            Mem(e) => todo!(),
-            FromInt(_) => todo!(),
-            Variable(_) => todo!(),
-            Value(_) => todo!(),
+            Mem(e) => format!("boolean[{}]", e.compile(state)),
+            FromInt(e) => format!("({}) != 0", e.compile(state)),
+            Variable(v) => state.variable_table.get_name(*v),
+            Value(v) => format!("{v:?}"),
         }
     }
 }
@@ -807,6 +833,23 @@ pub enum IntOpcode {
     BitXor,
     BitShiftRight,
     BitShiftLeft,
+}
+impl IntOpcode {
+    const fn as_str(&self) -> &'static str {
+        use IntOpcode::*;
+        match self {
+            Mul => "*",
+            Div => "/",
+            Mod => "%",
+            Add => "+",
+            Sub => "-",
+            BitAnd => "&",
+            BitOr => "|",
+            BitXor => "^",
+            BitShiftRight => ">>",
+            BitShiftLeft => "<<",
+        }
+    }
 }
 impl TryFrom<BinaryOpcode> for IntOpcode {
     type Error = String;
@@ -858,7 +901,7 @@ impl IntExpr {
                 }
             }
             Mem(e) => state.read_memory_int(e.evaluate(state)),
-            FromBool(b) => b.evaluate(state) as i32,
+            FromBool(b) => i32::from(b.evaluate(state)),
             FromReal(r) => r.evaluate(state) as i32,
             Variable(v) => state.get_int_variable_value(*v),
             Value(i) => *i,
@@ -867,12 +910,16 @@ impl IntExpr {
     fn compile(&self, state: &State) -> String {
         use IntExpr::*;
         match self {
-            Binary(a, op, b) => todo!(),
-            Mem(e) => todo!(),
-            FromBool(e) => todo!(),
-            FromReal(e) => todo!(),
-            Variable(v) => todo!(),
-            Value(v) => todo!(),
+            Binary(a, op, b) => {
+                let a = a.compile(state);
+                let b = b.compile(state);
+                format!("({}) {} ({})", a, op.as_str(), b)
+            }
+            Mem(e) => format!("integer[{}]", e.compile(state)),
+            FromBool(e) => format!("({}) as i32", e.compile(state)),
+            FromReal(e) => format!("({}) as i32", e.compile(state)),
+            Variable(v) => state.variable_table.get_name(*v),
+            Value(v) => format!("{v:?}"),
         }
     }
 }
@@ -883,6 +930,18 @@ pub enum RealOpcode {
     Mod,
     Add,
     Sub,
+}
+impl RealOpcode {
+    const fn as_str(&self) -> &'static str {
+        use RealOpcode::*;
+        match self {
+            Mul => "*",
+            Div => "/",
+            Mod => "%",
+            Add => "+",
+            Sub => "-",
+        }
+    }
 }
 impl TryFrom<BinaryOpcode> for RealOpcode {
     type Error = String;
@@ -909,8 +968,9 @@ pub enum RealExpr {
 }
 impl RealExpr {
     fn evaluate(&self, state: &State) -> f64 {
+        use RealExpr::*;
         match self {
-            RealExpr::Binary(a, op, b) => {
+            Binary(a, op, b) => {
                 let a = a.evaluate(state);
                 let b = b.evaluate(state);
                 use RealOpcode::*;
@@ -922,19 +982,25 @@ impl RealExpr {
                     Sub => a - b,
                 }
             }
-            RealExpr::Mem(e) => state.read_memory_real(e.evaluate(state)),
-            RealExpr::FromInt(i) => i.evaluate(state) as f64,
-            RealExpr::Variable(v) => state.get_real_variable_value(*v),
-            RealExpr::Value(r) => *r,
+            Mem(e) => state.read_memory_real(e.evaluate(state)),
+            FromInt(i) => i.evaluate(state) as f64,
+            Variable(v) => state.get_real_variable_value(*v),
+            Value(r) => *r,
         }
     }
+
     fn compile(&self, state: &State) -> String {
+        use RealExpr::*;
         match self {
-            RealExpr::Binary(_, _, _) => todo!(),
-            RealExpr::Mem(_) => todo!(),
-            RealExpr::FromInt(_) => todo!(),
-            RealExpr::Variable(_) => todo!(),
-            RealExpr::Value(_) => todo!(),
+            Binary(a, op, b) => {
+                let a = a.compile(state);
+                let b = b.compile(state);
+                format!("({}) {} ({})", a, op.as_str(), b)
+            }
+            Mem(e) => format!("real[{}]", e.compile(state)),
+            FromInt(e) => format!("({}) as f64", e.compile(state)),
+            Variable(v) => state.variable_table.get_name(*v),
+            Value(v) => format!("{v:?}"),
         }
     }
 }

@@ -75,7 +75,7 @@ end.
     let mut state = State::new();
 
     let execute = true;
-    let compile = false;
+    let compile = true;
 
     eprintln!("Program:\n{program}\n$");
     match ProgParser::new().parse(&mut state, program) {
