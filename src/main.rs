@@ -5,13 +5,11 @@
 #![allow(clippy::use_debug)]
 #![allow(clippy::no_effect_underscore_binding)]
 
-//use crate::ProgParser;
-//use pascal_parser_rust::State;
 use pascal_parser_rust::ProgParser;
 use pascal_parser_rust::State;
 use std::env::args;
 use std::time::Instant;
-fn main() -> Result<(), ()> {
+fn main() -> Result<(), String> {
     let execute = args().find(|s| s == "-x").is_some();
     let compile = args().find(|s| s == "-c").is_some();
     let help = args().find(|s| s == "-h" || s == "--help").is_some();
@@ -29,11 +27,9 @@ fn main() -> Result<(), ()> {
         eprintln!("    cargo run -- example_programs/prim.pas -x");
         eprintln!("    cargo run -- example_programs/fib.pas -c");
         eprintln!("    cat example_programs/fib.pas | cargo run -- -x");
-        return Ok(());
-    }
-
-    // monads are fun
-    match args()
+        Ok(())
+    } else if let Some(program) = args()
+        .skip(1)
         .map(std::fs::read_to_string)
         .map(Result::ok)
         .flatten()
@@ -41,43 +37,36 @@ fn main() -> Result<(), ()> {
         .or_else(|| {
             eprintln!("Reading program from stdin... (Ctrl-D to send EOF)");
             std::io::read_to_string(std::io::stdin()).ok()
-        }) {
-        None => {
-            eprintln!("Error reading from file and standard input");
-            Err(())
-        }
-        Some(program) => {
-            let mut state = State::default();
-
-            eprintln!("Program:\n{program}\n$");
-            match ProgParser::new().parse(&mut state, &program) {
-                Err(e) => {
-                    eprintln!("COULD NOT PARSE!");
+        })
+    {
+        let mut state = State::default();
+        eprintln!("Program:\n{program}\n$");
+        ProgParser::new()
+            .parse(&mut state, &program)
+            .map_err(|e| {
+                eprintln!("COULD NOT PARSE!");
+                eprintln!();
+                e.to_string()
+            })
+            .map(|parsed| {
+                eprintln!("PARSE OK!");
+                eprintln!("{:?}", &state.variable_table);
+                eprintln!("{:?}", &parsed);
+                if execute {
+                    eprintln!("executing...");
+                    let start = Instant::now();
+                    parsed.execute(&mut state);
+                    let duration = start.elapsed();
+                    eprintln!("done...");
                     eprintln!("{:?}", &state.variable_table);
-                    eprintln!("{e:?}");
-                    Err(())
+                    eprintln!("Execution completed in {duration:?}");
                 }
-                Ok(parsed) => {
-                    eprintln!("PARSE OK!");
-                    eprintln!("{:?}", &state.variable_table);
-                    eprintln!("{:?}", &parsed);
-                    if execute {
-                        eprintln!("executing...");
-                        let start = Instant::now();
-                        parsed.execute(&mut state);
-                        let duration = start.elapsed();
-
-                        eprintln!("done...");
-                        eprintln!("{:?}", &state.variable_table);
-                        eprintln!("Execution completed in {duration:?}");
-                    }
-                    if compile {
-                        eprintln!("compiling...");
-                        println!("{}", parsed.compile(&state));
-                    }
-                    Ok(())
+                if compile {
+                    eprintln!("compiling...");
+                    println!("{}", parsed.compile(&state));
                 }
-            }
-        }
+            })
+    } else {
+        Err("Error reading from file and standard input".to_string())
     }
 }
