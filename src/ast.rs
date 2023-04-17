@@ -26,7 +26,6 @@ use std::collections::HashMap;
 extern crate derive_more;
 use derive_more::{Display, From};
 
-const UNCHECKED_INDEXING: bool = true;
 
 #[non_exhaustive]
 #[derive(Debug)]
@@ -78,8 +77,8 @@ pub struct State {
     pub executed_statements: usize,
     max_size: usize,
 }
-impl State {
-    pub fn new() -> Self {
+impl Default for State {
+    fn default() -> Self {
         let max_size = 256 * 1024;
         Self {
             variable_table: VariableTable::new(),
@@ -90,6 +89,8 @@ impl State {
             max_size,
         }
     }
+}
+impl State {
     pub(crate) fn push_variable(
         &mut self,
         name: String,
@@ -104,11 +105,11 @@ impl State {
         self.variable_table.get_type(v)
     }
     fn set_bool_variable_value(&mut self, v: VariableReference, val: bool) {
-        debug_assert_eq!(v.1, Type::Boolean);
+        debug_assert_eq!(v.1, Type::Bool);
         self.variable_table.set_bool(v.0, val);
     }
     fn set_int_variable_value(&mut self, v: VariableReference, val: i32) {
-        debug_assert_eq!(v.1, Type::Integer);
+        debug_assert_eq!(v.1, Type::Int);
         self.variable_table.set_int(v.0, val);
     }
     fn set_real_variable_value(&mut self, v: VariableReference, val: f64) {
@@ -116,11 +117,11 @@ impl State {
         self.variable_table.set_real(v.0, val);
     }
     fn get_int_variable_value(&self, v: VariableReference) -> i32 {
-        debug_assert_eq!(v.1, Type::Integer);
+        debug_assert_eq!(v.1, Type::Int);
         self.variable_table.get_int(v.0)
     }
     fn get_bool_variable_value(&self, v: VariableReference) -> bool {
-        debug_assert_eq!(v.1, Type::Boolean);
+        debug_assert_eq!(v.1, Type::Bool);
         self.variable_table.get_bool(v.0)
     }
     fn get_real_variable_value(&self, v: VariableReference) -> f64 {
@@ -178,12 +179,12 @@ impl VariableTable {
             use Type::*;
             let index;
             match variable_type {
-                Boolean => {
+                Bool => {
                     index = self.bools.len();
                     self.bools.push(Default::default());
                     &mut self.bools_names
                 }
-                Integer => {
+                Int => {
                     index = self.ints.len();
                     self.ints.push(Default::default());
                     &mut self.ints_names
@@ -229,8 +230,8 @@ impl VariableTable {
     fn get_name(&self, v: VariableReference) -> String {
         use Type::*;
         match v.1 {
-            Boolean => self.bools_names[v.0].clone(),
-            Integer => self.ints_names[v.0].clone(),
+            Bool => self.bools_names[v.0].clone(),
+            Int => self.ints_names[v.0].clone(),
             Real => self.reals_names[v.0].clone(),
         }
     }
@@ -273,7 +274,7 @@ impl BoolAssignable {
     fn compile(&self, state: &State) -> String {
         use BoolAssignable::*;
         match self {
-            Mem(e) => format!("{}[{}]", Type::Boolean.as_pascal_string(), e.compile(state)),
+            Mem(e) => format!("{}[{}]", Type::Bool.as_pascal_string(), e.compile(state)),
             Variable(v) => v.compile(state),
         }
     }
@@ -294,7 +295,7 @@ impl IntAssignable {
     fn compile(&self, state: &State) -> String {
         use IntAssignable::*;
         match self {
-            Mem(e) => format!("{}[{}]", Type::Integer.as_pascal_string(), e.compile(state)),
+            Mem(e) => format!("{}[{}]", Type::Int.as_pascal_string(), e.compile(state)),
             Variable(v) => v.compile(state),
         }
     }
@@ -331,16 +332,16 @@ impl Assignable {
     pub(crate) fn variable(v: VariableReference, state: &State) -> Self {
         use Type::*;
         match state.get_variable_type(v) {
-            Boolean => BoolAssignable::Variable(v).into(),
-            Integer => IntAssignable::Variable(v).into(),
+            Bool => BoolAssignable::Variable(v).into(),
+            Int => IntAssignable::Variable(v).into(),
             Real => RealAssignable::Variable(v).into(),
         }
     }
     pub(crate) fn memory(t: Type, e: Expr) -> Self {
         use Type::*;
         match t {
-            Boolean => BoolAssignable::Mem(e.cast_int()).into(),
-            Integer => IntAssignable::Mem(e.cast_int()).into(),
+            Bool => BoolAssignable::Mem(e.cast_int()).into(),
+            Int => IntAssignable::Mem(e.cast_int()).into(),
             Real => RealAssignable::Mem(e.cast_int()).into(),
         }
     }
@@ -418,95 +419,57 @@ impl StatList {
 
 #[derive(Debug, Copy, Clone, PartialOrd, Ord, Eq, PartialEq, Hash)]
 pub enum Type {
-    Boolean,
-    Integer,
+    Bool,
+    Int,
     Real,
 }
 impl Type {
     const fn as_pascal_string(self) -> &'static str {
         use Type::*;
         match self {
-            Boolean => "boolean",
-            Integer => "integer",
+            Bool => "boolean",
+            Int => "integer",
             Real => "real",
         }
     }
     const fn as_rust_str(self) -> &'static str {
         use Type::*;
         match self {
-            Boolean => "bool",
-            Integer => "i32",
+            Bool => "bool",
+            Int => "i32",
             Real => "f64",
         }
     }
 }
-#[derive(Debug, Copy, Clone)]
-pub enum ValuePair {
-    Integer(i32, i32),
-    Real(f64, f64),
-    Boolean(bool, bool),
-}
 #[derive(Debug, Copy, Clone, From, Display)]
 pub enum Value {
-    Integer(i32),
+    Int(i32),
     Real(f64),
-    Boolean(bool),
+    Bool(bool),
 }
-#[rustfmt::skip]
-impl From<Value> for usize { fn from(val: Value) -> Self { val.coerce_integer() as usize } }
-#[rustfmt::skip]
-impl From<Value> for i32 { fn from(val: Value) -> Self { val.coerce_integer() } }
-#[rustfmt::skip]
-impl From<Value> for f64 { fn from(val: Value) -> Self { val.coerce_real() } }
-#[rustfmt::skip]
-impl From<Value> for bool { fn from(val: Value) -> Self { val.coerce_bool() } }
 impl Value {
     const fn default_from_type(t: Type) -> Value {
         use Type::*;
         match t {
-            Boolean => Value::Boolean(false),
-            Integer => Value::Integer(0),
+            Bool => Value::Bool(false),
+            Int => Value::Int(0),
             Real => Value::Real(0.0),
-        }
-    }
-    const fn coerce_real(self) -> f64 {
-        use Value::*;
-        match self {
-            Integer(i) => i as f64,
-            Real(r) => r,
-            Boolean(b) => b as i32 as f64,
-        }
-    }
-    const fn coerce_integer(self) -> i32 {
-        use Value::*;
-        match self {
-            Integer(i) => i,
-            Real(r) => r as i32,
-            Boolean(b) => b as i32,
-        }
-    }
-    const fn coerce_bool(self) -> bool {
-        use Value::*;
-        match self {
-            Integer(i) => i != 0,
-            Real(r) => (r as i32) != 0,
-            Boolean(b) => b,
         }
     }
     const fn get_type(self) -> Type {
         use Value::*;
         match self {
-            Integer(_) => Type::Integer,
+            Int(_) => Type::Int,
             Real(_) => Type::Real,
-            Boolean(_) => Type::Boolean,
+            Bool(_) => Type::Bool,
         }
     }
     fn compile(self) -> String {
         use Value::*;
         match self {
-            Integer(v) => format!("{v}"),
+            Int(v) => format!("{v}"),
             Real(v) => format!("{v}"),
-            Boolean(v) => format!("{v}"),
+            Bool(v) => format!("{v}"),
         }
     }
 }
@@ -560,36 +523,36 @@ impl Expr {
     pub(crate) fn variable(v: VariableReference, state: &State) -> Expr {
         use Type::*;
         match state.get_variable_type(v) {
-            Boolean => BoolExpr::Variable(v).into(),
-            Integer => IntExpr::Variable(v).into(),
+            Bool => BoolExpr::Variable(v).into(),
+            Int => IntExpr::Variable(v).into(),
             Real => RealExpr::Variable(v).into(),
         }
     }
     pub(crate) fn mem(mem_type: Type, e: Expr) -> Expr {
         use Type::*;
         match mem_type {
-            Boolean => BoolExpr::Mem(Box::new(e.cast_int())).into(),
-            Integer => IntExpr::Mem(Box::new(e.cast_int())).into(),
+            Bool => BoolExpr::Mem(Box::new(e.cast_int())).into(),
+            Int => IntExpr::Mem(Box::new(e.cast_int())).into(),
             Real => RealExpr::Mem(Box::new(e.cast_int())).into(),
         }
     }
     pub(crate) fn value(v: Value) -> Expr {
         use Value::*;
         match v {
-            Integer(i) => IntExpr::Value(i).into(),
+            Int(i) => IntExpr::Value(i).into(),
             Real(r) => RealExpr::Value(r).into(),
-            Boolean(b) => BoolExpr::Value(b).into(),
+            Bool(b) => BoolExpr::Value(b).into(),
         }
     }
     pub(crate) fn binary(a: Expr, b: Expr, op: BinaryOpcode) -> Result<Expr, String> {
         use Type::*;
         match a.get_type().max(b.get_type()) {
-            Boolean => {
+            Bool => {
                 let a = Box::new(a.cast_bool());
                 let b = Box::new(b.cast_bool());
                 op.try_into().map(|op| BoolExpr::Binary(a, op, b).into())
             }
-            Integer => {
+            Int => {
                 let a = Box::new(a.cast_int());
                 let b = Box::new(b.cast_int());
                 match (op.try_into(), op.try_into()) {
@@ -636,16 +599,16 @@ impl Expr {
     pub(crate) fn cast_type(self, new_type: Type) -> Self {
         use Type::*;
         match new_type {
-            Boolean => self.cast_bool().into(),
-            Integer => self.cast_int().into(),
+            Bool => self.cast_bool().into(),
+            Int => self.cast_int().into(),
             Real => self.cast_real().into(),
         }
     }
     const fn get_type(&self) -> Type {
         use Expr::*;
         match self {
-            Bool(_) => Type::Boolean,
-            Int(_) => Type::Integer,
+            Bool(_) => Type::Bool,
+            Int(_) => Type::Int,
             Real(_) => Type::Real,
         }
     }
@@ -787,7 +750,7 @@ impl BoolExpr {
                 },
                 b.compile(state),
             ),
-            Mem(e) => format!("{}[{}]", Type::Boolean.as_pascal_string(), e.compile(state)),
+            Mem(e) => format!("{}[{}]", Type::Bool.as_pascal_string(), e.compile(state)),
             FromInt(e) => format!("({}) != 0", e.compile(state)),
             Variable(v) => state.variable_table.get_name(*v),
             Value(v) => format!("{v:?}"),
@@ -888,7 +851,7 @@ impl IntExpr {
                 let b = b.compile(state);
                 format!("({}) {} ({})", a, op.as_str(), b)
             }
-            Mem(e) => format!("{}[{}]", Type::Integer.as_pascal_string(), e.compile(state)),
+            Mem(e) => format!("{}[{}]", Type::Int.as_pascal_string(), e.compile(state)),
             FromBool(e) => format!("({}) as i32", e.compile(state)),
             FromReal(e) => format!("({}) as i32", e.compile(state)),
             Variable(v) => state.variable_table.get_name(*v),

@@ -72,7 +72,7 @@ end.
 
     let program = prim;
 
-    let mut state = State::new();
+    let mut state = State::default();
 
     let execute = true;
     let compile = true;

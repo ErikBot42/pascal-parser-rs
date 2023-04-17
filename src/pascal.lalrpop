@@ -36,9 +36,9 @@ IdList: Vec<String> = {
 }
 
 Type: ast::Type = {
-    "integer" => ast::Type::Integer,
+    "integer" => ast::Type::Int,
     "real" => ast::Type::Real,
-    "boolean" => ast::Type::Boolean,
+    "boolean" => ast::Type::Bool,
 }
 
 // ----------------------------------------------------------------------------
@@ -116,9 +116,9 @@ Operand: ast::Expr = {
 }
 
 Value: ast::Value =  {
-    r"[0-9]+" =>? i32::from_str(<>).map(ast::Value::Integer).map_err(|_| ParseError::User {error: "Cannot parse int"}),
+    r"[0-9]+" =>? i32::from_str(<>).map(ast::Value::Int).map_err(|_| ParseError::User {error: "Cannot parse int"}),
     r"[0-9]*\.[0-9]+" =>? f64::from_str(<>).map(ast::Value::Real).map_err(|_| ParseError::User {error: "Cannot parse real"}),
-    "true" => ast::Value::Boolean(true),
-    "false" => ast::Value::Boolean(false),
+    "true" => ast::Value::Bool(true),
+    "false" => ast::Value::Bool(false),
 }
 
