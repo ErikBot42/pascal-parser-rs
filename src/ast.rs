@@ -26,7 +26,6 @@ use std::collections::HashMap;
 extern crate derive_more;
 use derive_more::{Display, From};
 
-
 #[non_exhaustive]
 #[derive(Debug)]
 pub struct Prog {
@@ -37,37 +36,8 @@ impl Prog {
     pub const fn new(name: String, stat_list: StatList) -> Self {
         Self { name, stat_list }
     }
-    pub fn execute(&self, state: &mut State) {
-        println!("Running program {}", self.name);
-        self.stat_list.execute(state);
-    }
-    pub fn compile(&self, state: &State) -> String {
-        format!(
-            "fn main() {{
-
-// Static prelude
-use std::io::Write;
-let __internal_start_time= std::time::Instant::now();
-let mut __internal_stdout_print_lock = std::io::stdout().lock();
-let mut real: Vec<f64> = (0..{:?}).map(|_| Default::default()).collect();
-let mut integer: Vec<i32> = (0..{:?}).map(|_| Default::default()).collect();
-let mut boolean: Vec<bool> = (0..{:?}).map(|_| Default::default()).collect();
-
-// User defined variables
-{}
-// Code
-{}
-write!(__internal_stdout_print_lock, \"Done in {{:?}}\", __internal_start_time.elapsed());
-}}
-",
-            state.max_size,
-            state.max_size,
-            state.max_size,
-            state.variable_table.compile(),
-            self.stat_list.compile(state),
-        )
-    }
 }
+
 #[derive(Debug)]
 pub struct State {
     pub variable_table: VariableTable,
@@ -235,91 +205,24 @@ impl VariableTable {
             Real => self.reals_names[v.0].clone(),
         }
     }
-    fn compile(&self) -> String {
-        let mut buffer = String::default();
-        for (variable, value) in &self.variables {
-            writeln!(
-                &mut buffer,
-                "let mut {}: {} = {};",
-                variable,
-                value.get_type().as_rust_str(),
-                value.compile()
-            )
-            .unwrap();
-        }
-        buffer
-    }
 }
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub struct VariableReference(usize, Type);
-impl VariableReference {
-    fn compile(self, state: &State) -> String {
-        state.variable_table.variables[self.0].0.clone()
-    }
-}
 
 #[derive(Debug)]
 pub enum BoolAssignable {
     Mem(IntExpr),
     Variable(VariableReference),
 }
-impl BoolAssignable {
-    fn assign(&self, state: &mut State, val: bool) {
-        use BoolAssignable::*;
-        match self {
-            Mem(e) => state.write_memory_bool(e.evaluate(state), val),
-            Variable(v) => state.set_bool_variable_value(*v, val),
-        }
-    }
-    fn compile(&self, state: &State) -> String {
-        use BoolAssignable::*;
-        match self {
-            Mem(e) => format!("{}[{}]", Type::Bool.as_pascal_string(), e.compile(state)),
-            Variable(v) => v.compile(state),
-        }
-    }
-}
 #[derive(Debug)]
 pub enum IntAssignable {
     Mem(IntExpr),
     Variable(VariableReference),
 }
-impl IntAssignable {
-    fn assign(&self, state: &mut State, val: i32) {
-        use IntAssignable::*;
-        match self {
-            Mem(e) => state.write_memory_int(e.evaluate(state), val),
-            Variable(v) => state.set_int_variable_value(*v, val),
-        }
-    }
-    fn compile(&self, state: &State) -> String {
-        use IntAssignable::*;
-        match self {
-            Mem(e) => format!("{}[{}]", Type::Int.as_pascal_string(), e.compile(state)),
-            Variable(v) => v.compile(state),
-        }
-    }
-}
 #[derive(Debug)]
 pub enum RealAssignable {
     Mem(IntExpr),
     Variable(VariableReference),
-}
-impl RealAssignable {
-    fn assign(&self, state: &mut State, val: f64) {
-        use RealAssignable::*;
-        match self {
-            Mem(e) => state.write_memory_real(e.evaluate(state), val),
-            Variable(v) => state.set_real_variable_value(*v, val),
-        }
-    }
-    fn compile(&self, state: &State) -> String {
-        use RealAssignable::*;
-        match self {
-            Mem(e) => format!("{}[{}]", Type::Real.as_pascal_string(), e.compile(state)),
-            Variable(v) => v.compile(state),
-        }
-    }
 }
 
 #[derive(Debug, From)]
@@ -329,7 +232,7 @@ pub enum Assignable {
     Real(RealAssignable),
 }
 impl Assignable {
-    pub(crate) fn variable(v: VariableReference, state: &State) -> Self {
+    pub(crate) fn new_variable(v: VariableReference, state: &State) -> Self {
         use Type::*;
         match state.get_variable_type(v) {
             Bool => BoolAssignable::Variable(v).into(),
@@ -337,7 +240,7 @@ impl Assignable {
             Real => RealAssignable::Variable(v).into(),
         }
     }
-    pub(crate) fn memory(t: Type, e: Expr) -> Self {
+    pub(crate) fn new_memory(t: Type, e: Expr) -> Self {
         use Type::*;
         match t {
             Bool => BoolAssignable::Mem(e.cast_int()).into(),
@@ -358,44 +261,12 @@ pub enum Stat {
     PrintLn(Expr),
 }
 impl Stat {
-    pub(crate) fn assign(a: Assignable, e: Expr) -> Result<Self, String> {
+    pub(crate) fn new_assign(a: Assignable, e: Expr) -> Result<Self, String> {
         match (a, e) {
             (Assignable::Bool(a), Expr::Bool(e)) => Ok(Stat::AssignBool(a, e)),
             (Assignable::Int(a), Expr::Int(e)) => Ok(Stat::AssignInt(a, e)),
             (Assignable::Real(a), Expr::Real(e)) => Ok(Stat::AssignReal(a, e)),
             (a, e) => Err(format!("Invalid assign {a:?} with {e:?}")),
-        }
-    }
-    fn execute(&self, state: &mut State) {
-        use Stat::*;
-        match self {
-            AssignBool(a, e) => a.assign(state, e.evaluate(state)),
-            AssignReal(a, e) => a.assign(state, e.evaluate(state)),
-            AssignInt(a, e) => a.assign(state, e.evaluate(state)),
-            If(e, s) => {
-                if e.evaluate(state) {
-                    s.execute(state);
-                }
-            }
-            While(e, s) => {
-                while e.evaluate(state) {
-                    s.execute(state);
-                }
-            }
-            Print(e) => print!("{}", e.evaluate(state)),
-            PrintLn(e) => println!("{}", e.evaluate(state)),
-        }
-    }
-    fn compile(&self, state: &State) -> String {
-        use Stat::*;
-        match self {
-            AssignBool(a, e) => format!("{} = {};\n", a.compile(state), e.compile(state)),
-            AssignReal(a, e) => format!("{} = {};\n", a.compile(state), e.compile(state)),
-            AssignInt(a, e) => format!("{} = {};\n", a.compile(state), e.compile(state)),
-            If(e, s) => format!("if {} {{\n{}}}\n", e.compile(state), s.compile(state)),
-            While(e, s) => format!("while {} {{\n{}}}\n", e.compile(state), s.compile(state)),
-            Print(e) => format!("print!(\"{{:?}}\"{});\n", e.compile(state)),
-            PrintLn(e) => format!("println!(\"{{:?}}\"{});\n", e.compile(state)),
         }
     }
 }
@@ -520,7 +391,7 @@ impl Expr {
             Real(e) => e.compile(state),
         }
     }
-    pub(crate) fn variable(v: VariableReference, state: &State) -> Expr {
+    pub(crate) fn new_variable(v: VariableReference, state: &State) -> Expr {
         use Type::*;
         match state.get_variable_type(v) {
             Bool => BoolExpr::Variable(v).into(),
@@ -528,7 +399,7 @@ impl Expr {
             Real => RealExpr::Variable(v).into(),
         }
     }
-    pub(crate) fn mem(mem_type: Type, e: Expr) -> Expr {
+    pub(crate) fn new_mem(mem_type: Type, e: Expr) -> Expr {
         use Type::*;
         match mem_type {
             Bool => BoolExpr::Mem(Box::new(e.cast_int())).into(),
@@ -536,7 +407,7 @@ impl Expr {
             Real => RealExpr::Mem(Box::new(e.cast_int())).into(),
         }
     }
-    pub(crate) fn value(v: Value) -> Expr {
+    pub(crate) fn new_value(v: Value) -> Expr {
         use Value::*;
         match v {
             Int(i) => IntExpr::Value(i).into(),
@@ -544,7 +415,7 @@ impl Expr {
             Bool(b) => BoolExpr::Value(b).into(),
         }
     }
-    pub(crate) fn binary(a: Expr, b: Expr, op: BinaryOpcode) -> Result<Expr, String> {
+    pub(crate) fn new_binary(a: Expr, b: Expr, op: BinaryOpcode) -> Result<Expr, String> {
         use Type::*;
         match a.get_type().max(b.get_type()) {
             Bool => {
@@ -937,6 +808,159 @@ impl RealExpr {
             FromInt(e) => format!("({}) as f64", e.compile(state)),
             Variable(v) => state.variable_table.get_name(*v),
             Value(v) => format!("{v:?}"),
+        }
+    }
+}
+
+mod interpret {
+    use super::*;
+    impl Prog {
+        pub fn execute(&self, state: &mut State) {
+            println!("Running program {}", self.name);
+            self.stat_list.execute(state);
+        }
+    }
+    impl BoolAssignable {
+        pub(crate) fn assign(&self, state: &mut State, val: bool) {
+            use BoolAssignable::*;
+            match self {
+                Mem(e) => state.write_memory_bool(e.evaluate(state), val),
+                Variable(v) => state.set_bool_variable_value(*v, val),
+            }
+        }
+    }
+    impl IntAssignable {
+        pub(crate) fn assign(&self, state: &mut State, val: i32) {
+            use IntAssignable::*;
+            match self {
+                Mem(e) => state.write_memory_int(e.evaluate(state), val),
+                Variable(v) => state.set_int_variable_value(*v, val),
+            }
+        }
+    }
+    impl RealAssignable {
+        pub(crate) fn assign(&self, state: &mut State, val: f64) {
+            use RealAssignable::*;
+            match self {
+                Mem(e) => state.write_memory_real(e.evaluate(state), val),
+                Variable(v) => state.set_real_variable_value(*v, val),
+            }
+        }
+    }
+    impl Stat {
+        pub(crate) fn execute(&self, state: &mut State) {
+            use Stat::*;
+            match self {
+                AssignBool(a, e) => a.assign(state, e.evaluate(state)),
+                AssignReal(a, e) => a.assign(state, e.evaluate(state)),
+                AssignInt(a, e) => a.assign(state, e.evaluate(state)),
+                If(e, s) => {
+                    if e.evaluate(state) {
+                        s.execute(state);
+                    }
+                }
+                While(e, s) => {
+                    while e.evaluate(state) {
+                        s.execute(state);
+                    }
+                }
+                Print(e) => print!("{}", e.evaluate(state)),
+                PrintLn(e) => println!("{}", e.evaluate(state)),
+            }
+        }
+    }
+}
+
+mod compile {
+    use super::*;
+    impl Prog {
+        pub fn compile(&self, state: &State) -> String {
+            format!(
+                "fn main() {{
+
+// Static prelude
+use std::io::Write;
+let __internal_start_time= std::time::Instant::now();
+let mut __internal_stdout_print_lock = std::io::stdout().lock();
+let mut real: Vec<f64> = (0..{:?}).map(|_| Default::default()).collect();
+let mut integer: Vec<i32> = (0..{:?}).map(|_| Default::default()).collect();
+let mut boolean: Vec<bool> = (0..{:?}).map(|_| Default::default()).collect();
+
+// User defined variables
+{}
+// Code
+{}
+write!(__internal_stdout_print_lock, \"Done in {{:?}}\", __internal_start_time.elapsed());
+}}
+",
+                state.max_size,
+                state.max_size,
+                state.max_size,
+                state.variable_table.compile(),
+                self.stat_list.compile(state),
+            )
+        }
+    }
+    impl VariableTable {
+        fn compile(&self) -> String {
+            let mut buffer = String::default();
+            for (variable, value) in &self.variables {
+                writeln!(
+                    &mut buffer,
+                    "let mut {}: {} = {};",
+                    variable,
+                    value.get_type().as_rust_str(),
+                    value.compile()
+                )
+                .unwrap();
+            }
+            buffer
+        }
+    }
+    impl VariableReference {
+        pub(crate) fn compile(self, state: &State) -> String {
+            state.variable_table.variables[self.0].0.clone()
+        }
+    }
+    impl BoolAssignable {
+        pub(crate) fn compile(&self, state: &State) -> String {
+            use BoolAssignable::*;
+            match self {
+                Mem(e) => format!("{}[{}]", Type::Bool.as_pascal_string(), e.compile(state)),
+                Variable(v) => v.compile(state),
+            }
+        }
+    }
+    impl IntAssignable {
+        pub(crate) fn compile(&self, state: &State) -> String {
+            use IntAssignable::*;
+            match self {
+                Mem(e) => format!("{}[{}]", Type::Int.as_pascal_string(), e.compile(state)),
+                Variable(v) => v.compile(state),
+            }
+        }
+    }
+    impl RealAssignable {
+        pub(crate) fn compile(&self, state: &State) -> String {
+            use RealAssignable::*;
+            match self {
+                Mem(e) => format!("{}[{}]", Type::Real.as_pascal_string(), e.compile(state)),
+                Variable(v) => v.compile(state),
+            }
+        }
+    }
+    impl Stat {
+        pub(crate) fn compile(&self, state: &State) -> String {
+            use Stat::*;
+            match self {
+                AssignBool(a, e) => format!("{} = {};\n", a.compile(state), e.compile(state)),
+                AssignReal(a, e) => format!("{} = {};\n", a.compile(state), e.compile(state)),
+                AssignInt(a, e) => format!("{} = {};\n", a.compile(state), e.compile(state)),
+                If(e, s) => format!("if {} {{\n{}}}\n", e.compile(state), s.compile(state)),
+                While(e, s) => format!("while {} {{\n{}}}\n", e.compile(state), s.compile(state)),
+                Print(e) => format!("print!(\"{{:?}}\"{});\n", e.compile(state)),
+                PrintLn(e) => format!("println!(\"{{:?}}\"{});\n", e.compile(state)),
+            }
         }
     }
 }

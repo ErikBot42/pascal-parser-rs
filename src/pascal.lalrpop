@@ -64,14 +64,14 @@ Stat: ast::Stat = {
 }
 
 AssignStat: ast::Stat = { 
-    <a: Assignable> ":=" <e:Expr> =>? ast::Stat::assign(a, e).map_err(|_| ParseError::User {error: "Invalid assign types" })
+    <a: Assignable> ":=" <e:Expr> =>? ast::Stat::new_assign(a, e).map_err(|_| ParseError::User {error: "Invalid assign types" })
 
     //(a.get_type(state) == e.get_type()).then_some(ast::Stat::Assign(a, e)) 
 }
 
 Assignable: ast::Assignable = {
-    <v: Variable> => ast::Assignable::variable(v, state),
-    <t: Type> "[" <e: Expr> "]" => ast::Assignable::memory(t, e),
+    <v: Variable> => ast::Assignable::new_variable(v, state),
+    <t: Type> "[" <e: Expr> "]" => ast::Assignable::new_memory(t, e),
 }
 
 Variable: ast::VariableReference = { 
@@ -83,8 +83,8 @@ Variable: ast::VariableReference = {
 Expr: ast::Expr = {
     <o:Operand> => o,
     "(" <e:Expr> ")" => e,
-    <a:Expr> <o:Opcode> <b:Operand> =>? ast::Expr::binary(a, b, o).map_err(|_| ParseError::User {error: "invalid operation"}),
-    <a:Expr> <o:Opcode> "(" <b:Expr> ")" =>? ast::Expr::binary(a, b, o).map_err(|_| ParseError::User {error: "invalid operation"}),
+    <a:Expr> <o:Opcode> <b:Operand> =>? ast::Expr::new_binary(a, b, o).map_err(|_| ParseError::User {error: "invalid operation"}),
+    <a:Expr> <o:Opcode> "(" <b:Expr> ")" =>? ast::Expr::new_binary(a, b, o).map_err(|_| ParseError::User {error: "invalid operation"}),
 }
 
 Opcode: ast::BinaryOpcode= {
@@ -109,10 +109,10 @@ Opcode: ast::BinaryOpcode= {
 
 
 Operand: ast::Expr = {
-    <v:Variable> => ast::Expr::variable(v, state),
-    <v:Value> => ast::Expr::value(v),
+    <v:Variable> => ast::Expr::new_variable(v, state),
+    <v:Value> => ast::Expr::new_value(v),
     <t:Type> "(" <e:Expr> ")" => e.cast_type(t),
-    <t:Type> "[" <e:Expr> "]" => ast::Expr::mem(t, e),
+    <t:Type> "[" <e:Expr> "]" => ast::Expr::new_mem(t, e),
 }
 
 Value: ast::Value =  {
